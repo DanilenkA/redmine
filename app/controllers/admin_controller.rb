@@ -36,9 +36,7 @@ class AdminController < ApplicationController
   end
 
   def projects
-    retrieve_query(ProjectQuery, false, :defaults => @default_columns_names)
-    @query.admin_projects = 1
-
+    retrieve_query(ProjectAdminQuery, false, :defaults => @default_columns_names)
     @entry_count = @query.result_count
     @entry_pages = Paginator.new @entry_count, per_page_option, params['page']
     @projects = @query.results_scope(:limit => @entry_pages.per_page, :offset => @entry_pages.offset).to_a
@@ -81,7 +79,8 @@ class AdminController < ApplicationController
       [:text_all_migrations_have_been_run, !ActiveRecord::Base.connection.pool.migration_context.needs_migration?],
       [:text_minimagick_available,     Object.const_defined?(:MiniMagick)],
       [:text_convert_available,        Redmine::Thumbnail.convert_available?],
-      [:text_gs_available,             Redmine::Thumbnail.gs_available?]
+      [:text_gs_available,             Redmine::Thumbnail.gs_available?],
+      [:text_pandoc_available, Redmine::Markdownizer.available?]
     ]
     @checklist << [:text_default_active_job_queue_changed, Rails.application.config.active_job.queue_adapter != :async] if Rails.env.production?
   end

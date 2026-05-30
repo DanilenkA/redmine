@@ -6,7 +6,7 @@
 <div id="query_form_content">
   <fieldset id="filters" class="collapsible <%= @query.new_record? ? "" : "collapsed" %>">
     <legend onclick="toggleFieldset(this);" class="icon icon-<%= @query.new_record? ? "expanded" : "collapsed" %>">
-      <%= sprite_icon(@query.new_record? ? "angle-down" : "angle-right") %>
+      <%= sprite_icon(@query.new_record? ? "angle-down" : "angle-right", rtl: !@query.new_record?) %>
       <%= l(:label_filter_plural) %>
     </legend>
     <div style="<%= @query.new_record? ? "" : "display: none;" %>">
@@ -17,7 +17,7 @@
   <% if @query.available_columns.any? %>
     <fieldset id="options" class="collapsible collapsed">
       <legend onclick="toggleFieldset(this);" class="icon icon-collapsed">
-        <%= sprite_icon("angle-right") %>
+        <%= sprite_icon("angle-right", rtl: true) %>
         <%= l(:label_options) %>
       </legend>
         <div class="hidden">
@@ -69,9 +69,8 @@
     <% end %>
   <% else %>
     <% if @query.editable_by?(User.current) %>
-      <% redirect_params = (controller_name == 'admin' && action_name == 'projects') ? {:admin_projects => 1} : {} %>
-      <%= link_to sprite_icon('edit', l(:button_edit_object, object_name: l(:label_query)).capitalize), edit_query_path(@query, redirect_params), :class => 'icon icon-edit' %>
-      <%= delete_link query_path(@query, redirect_params), {}, l(:button_delete_object, object_name: l(:label_query)).capitalize %>
+      <%= link_to sprite_icon('edit', l(:button_edit_object, object_name: l(:label_query)).capitalize), edit_query_path(@query), :class => 'icon icon-edit' %>
+      <%= delete_link query_path(@query), {}, l(:button_delete_object, object_name: l(:label_query)).capitalize %>
     <% end %>
   <% end %>
 </p>

@@ -60,6 +60,12 @@ class Redmine::ApiTest::TimeEntriesTest < Redmine::ApiTest::Base
     assert_response :not_found
   end
 
+  test "GET /time_entries/:id.xml with non visible time entry should 403 " do
+    Role.non_member.update(:time_entries_visibility => 'own')
+    get '/time_entries/4.xml', :headers => credentials('jsmith')
+    assert_response :forbidden
+  end
+
   test "POST /time_entries.xml with issue_id should create time entry" do
     assert_difference 'TimeEntry.count' do
       post(
@@ -73,7 +79,7 @@ class Redmine::ApiTest::TimeEntriesTest < Redmine::ApiTest::Base
     assert_response :created
     assert_equal 'application/xml', @response.media_type
 
-    entry = TimeEntry.order('id DESC').first
+    entry = TimeEntry.order(id: :desc).first
     assert_equal 'jsmith', entry.user.login
     assert_equal Issue.find(1), entry.issue
     assert_equal Project.find(1), entry.project
@@ -102,7 +108,7 @@ class Redmine::ApiTest::TimeEntriesTest < Redmine::ApiTest::Base
     assert_response :created
     assert_equal 'application/xml', @response.media_type
 
-    entry = TimeEntry.order('id DESC').first
+    entry = TimeEntry.order(id: :desc).first
     assert_equal 'accepted', entry.custom_field_value(field)
   end
 
@@ -119,7 +125,7 @@ class Redmine::ApiTest::TimeEntriesTest < Redmine::ApiTest::Base
     assert_response :created
     assert_equal 'application/xml', @response.media_type
 
-    entry = TimeEntry.order('id DESC').first
+    entry = TimeEntry.order(id: :desc).first
     assert_equal 'jsmith', entry.user.login
     assert_nil entry.issue
     assert_equal Project.find(1), entry.project

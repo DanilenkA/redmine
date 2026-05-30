@@ -24,15 +24,7 @@ class SettingTest < ActiveSupport::TestCase
     User.current = nil
   end
 
-  def teardown
-    Setting.delete_all
-    Setting.clear_cache
-  end
-
   def test_read_default
-    Setting.delete_all
-    Setting.clear_cache
-
     assert_equal "Redmine", Setting.app_title
     assert Setting.self_registration?
     assert !Setting.login_required?
@@ -127,7 +119,6 @@ class SettingTest < ActiveSupport::TestCase
     assert_equal 'UTF-8', Setting.commit_update_keywords.first['keywords'].encoding.name
   ensure
     Setting.where(:name => 'commit_update_keywords').delete_all
-    Setting.clear_cache
   end
 
   def test_mail_from_format_should_be_validated
@@ -144,7 +135,27 @@ class SettingTest < ActiveSupport::TestCase
     end
   end
 
+  def test_default_issue_due_date_offset_should_validate_values
+    with_locale 'en' do
+      # Setting.set_all_from_params returns nil when there are no validation errors.
+      assert_nil Setting.set_all_from_params(:default_issue_due_date_offset => '')
+      assert_nil Setting.set_all_from_params(:default_issue_due_date_offset => '0')
+      assert_nil Setting.set_all_from_params(:default_issue_due_date_offset => '5')
+      assert_nil Setting.set_all_from_params(:default_issue_due_date_offset => '+5')
+
+      errors = Setting.set_all_from_params(:default_issue_due_date_offset => 'foo')
+      assert_includes errors, [:default_issue_due_date_offset, 'is not a number']
+
+      errors = Setting.set_all_from_params(:default_issue_due_date_offset => '-1')
+      assert_includes errors, [:default_issue_due_date_offset, 'must be greater than or equal to 0']
+    end
+  end
+
   def test_default_text_formatting_for_new_installations_is_common_mark
     assert_equal 'common_mark', Setting.text_formatting
+  end
+
+  def test_default_wiki_tablesort_enabled_for_new_installations_is_disabled
+    assert_equal "0", Setting.wiki_tablesort_enabled
   end
 end

@@ -27,14 +27,14 @@ class Repository::Cvs < Repository
     'root_url',
     :if => lambda {|repository, user| repository.new_record?})
 
-  def self.human_attribute_name(attribute_key_name, *args)
+  def self.human_attribute_name(attribute_key_name, *)
     attr_name = attribute_key_name.to_s
     if attr_name == "root_url"
       attr_name = "cvsroot"
     elsif attr_name == "url"
       attr_name = "cvs_module"
     end
-    super(attr_name, *args)
+    super(attr_name, *)
   end
 
   def self.scm_adapter_class
@@ -190,7 +190,7 @@ class Repository::Cvs < Repository
 
       # Renumber new changesets in chronological order
       Changeset.
-        order('committed_on ASC, id ASC').
+        order(:committed_on, :id).
         where("repository_id = ? AND revision LIKE 'tmp%'", id).
         each do |changeset|
           changeset.update_attribute :revision, next_revision_number

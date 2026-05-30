@@ -11,7 +11,8 @@
     </li>
     <% week.each do |day| %>
     <li class="<%= calendar.day_css_classes day %> calbody">
-      <p class="day-num"><%= day.day %>
+      <p class="day-num">
+        <span class="day-value"><%= day.day %></span>
         <span class="abbr-day">(<%= abbr_day_name(day.cwday) %>)</span>
       </p>
       <% calendar.events_on(day).each do |i| %>
@@ -20,8 +21,8 @@
           <% ending = day == i.due_date %>
           <%= tag.div class: [ i.css_classes, 'tooltip hascontextmenu', starting: starting, ending: ending] do %>
             <%= "#{i.project} -" unless @project && @project == i.project %>
-            <%= sprite_icon('bullet-go') if starting && starting != ending %>
-            <%= sprite_icon('bullet-end') if ending && starting != ending %>
+            <%= sprite_icon('bullet-go', rtl: true) if starting && starting != ending %>
+            <%= sprite_icon('bullet-end', rtl: true) if ending && starting != ending %>
             <%= sprite_icon('bullet-go-end') if starting && ending %>
             <%= link_to_issue i, :truncate => 30 %>
             <span class="tip"><%= render_issue_tooltip i %></span>

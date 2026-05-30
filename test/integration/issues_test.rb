@@ -205,7 +205,7 @@ class IssuesTest < Redmine::IntegrationTest
 
       get '/issues/5'
       assert_response :success
-      assert_select '.next-prev-links .position', :text => '5 of 6'
+      assert_select '.next-prev-links .pagination .page.position', :text => '5 of 6'
     end
   end
 
@@ -217,8 +217,8 @@ class IssuesTest < Redmine::IntegrationTest
 
       get '/issues/5'
       assert_response :success
-      assert_select '.next-prev-links .position', :text => '3 of 5'
-      assert_select '.next-prev-links .position a[href^=?]', '/projects/ecookbook/issues?'
+      assert_select '.next-prev-links .pagination .page.position', :text => '3 of 5'
+      assert_select '.next-prev-links .pagination .page.position a[href^=?]', '/projects/ecookbook/issues?'
     end
   end
 
@@ -236,7 +236,7 @@ class IssuesTest < Redmine::IntegrationTest
 
       get '/issues/5'
       assert_response :success
-      assert_select '.next-prev-links .position', :text => '6 of 8'
+      assert_select '.next-prev-links .pagination .page.position', :text => '6 of 8'
     end
   end
 
@@ -355,7 +355,7 @@ class IssuesTest < Redmine::IntegrationTest
       end
       # Issue view
       follow_redirect!
-      assert_select 'ul.details li', :text => "Tester changed from #{tester} to #{new_tester}"
+      assert_select 'ul.journal-details li', :text => "Tester changed from #{tester} to #{new_tester}"
     end
   end
 

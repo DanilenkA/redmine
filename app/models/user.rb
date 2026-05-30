@@ -28,46 +28,55 @@ class User < Principal
   USER_FORMATS = {
     :firstname_lastname => {
       :string => '#{firstname} #{lastname}',
+      :initials => '#{firstname.to_s.first}#{lastname.to_s.first}',
       :order => %w(firstname lastname id),
       :setting_order => 1
     },
     :firstname_lastinitial => {
       :string => '#{firstname} #{lastname.to_s.chars.first}.',
+      :initials => '#{firstname.to_s.first}#{lastname.to_s.first}',
       :order => %w(firstname lastname id),
       :setting_order => 2
     },
     :firstinitial_lastname => {
       :string => '#{firstname.to_s.gsub(/(([[:alpha:]])[[:alpha:]]*\.?)/, \'\2.\')} #{lastname}',
+      :initials => '#{firstname.to_s.gsub(/(([[:alpha:]])[[:alpha:]]*\.?)/, \'\2.\').first}#{lastname.to_s.first}',
       :order => %w(firstname lastname id),
       :setting_order => 2
     },
     :firstname => {
       :string => '#{firstname}',
+      :initials => '#{firstname.to_s.first(2)}',
       :order => %w(firstname id),
       :setting_order => 3
     },
     :lastname_firstname => {
       :string => '#{lastname} #{firstname}',
+      :initials => '#{lastname.to_s.first}#{firstname.to_s.first}',
       :order => %w(lastname firstname id),
       :setting_order => 4
     },
     :lastnamefirstname => {
       :string => '#{lastname}#{firstname}',
+      :initials => '#{lastname.to_s.first}#{firstname.to_s.first}',
       :order => %w(lastname firstname id),
       :setting_order => 5
     },
     :lastname_comma_firstname => {
       :string => '#{lastname}, #{firstname}',
+      :initials => '#{lastname.to_s.first}#{firstname.to_s.first}',
       :order => %w(lastname firstname id),
       :setting_order => 6
     },
     :lastname => {
       :string => '#{lastname}',
+      :initials => '#{lastname.to_s.first(2)}',
       :order => %w(lastname id),
       :setting_order => 7
     },
     :username => {
       :string => '#{login}',
+      :initials => '#{login.to_s.first(2)}',
       :order => %w(login id),
       :setting_order => 8
     },
@@ -80,6 +89,7 @@ class User < Principal
     ['only_my_events', :label_user_mail_option_only_my_events],
     ['only_assigned', :label_user_mail_option_only_assigned],
     ['only_owner', :label_user_mail_option_only_owner],
+    ['only_my_watches', :label_user_mail_option_only_my_watches],
     ['none', :label_user_mail_option_none]
   ]
 
@@ -89,10 +99,12 @@ class User < Principal
                           :after_remove => Proc.new {|user, group| group.user_removed(user)}
   has_many :changesets, :dependent => :nullify
   has_one :preference, :dependent => :destroy, :class_name => 'UserPreference'
-  has_one :atom_token, lambda {where "action='feeds'"}, :class_name => 'Token'
-  has_one :api_token, lambda {where "action='api'"}, :class_name => 'Token'
-  has_one :email_address, lambda {where :is_default => true}, :autosave => true
+  has_one :atom_token, lambda {where "#{table.name}.action='feeds'"}, :class_name => 'Token'
+  has_one :api_token, lambda {where "#{table.name}.action='api'"}, :class_name => 'Token'
   has_many :email_addresses, :dependent => :delete_all
+  has_many :reactions, dependent: :delete_all
+  has_many :webhooks, dependent: :destroy
+
   belongs_to :auth_source
 
   scope :logged, lambda {where("#{User.table_name}.status <> #{STATUS_ANONYMOUS}")}
@@ -103,6 +115,7 @@ class User < Principal
   attr_accessor :password, :password_confirmation, :generate_password
   attr_accessor :last_before_login_on
   attr_accessor :remote_ip
+  attr_writer   :oauth_scope
 
   LOGIN_LENGTH_LIMIT = 60
   MAIL_LENGTH_LIMIT = 254
@@ -110,7 +123,7 @@ class User < Principal
   validates_presence_of :login, :firstname, :lastname, :if => Proc.new {|user| !user.is_a?(AnonymousUser)}
   validates_uniqueness_of :login, :if => Proc.new {|user| user.login_changed? && user.login.present?}, :case_sensitive => false
   # Login must contain letters, numbers, underscores only
-  validates_format_of :login, :with => /\A[a-z0-9_\-@\.]*\z/i
+  validates_format_of :login, :with => /\A[a-z0-9_\-@.]*\z/i
   validates_length_of :login, :maximum => LOGIN_LENGTH_LIMIT
   validates_length_of :firstname, :maximum => 30
   validates_length_of :lastname, :maximum => 255
@@ -170,7 +183,7 @@ class User < Principal
   end
 
   alias :base_reload :reload
-  def reload(*args)
+  def reload(*)
     @name = nil
     @roles = nil
     @projects_by_role = nil
@@ -181,7 +194,7 @@ class User < Principal
     @builtin_role = nil
     @visible_project_ids = nil
     @managed_roles = nil
-    base_reload(*args)
+    base_reload(*)
   end
 
   def mail
@@ -254,6 +267,14 @@ class User < Principal
     USER_FORMATS[formatter || Setting.user_format] || USER_FORMATS[:firstname_lastname]
   end
 
+  # Returns true if the selected user format puts lastname before firstname.
+  def self.lastname_before_firstname?(formatter = nil)
+    order = name_formatter(formatter)[:order]
+    return false unless order.include?('firstname') && order.include?('lastname')
+
+    order.index('lastname') < order.index('firstname')
+  end
+
   # Returns an array of fields names than can be used to make an order statement for users
   # according to how user names are displayed
   # Examples:
@@ -273,6 +294,14 @@ class User < Principal
     else
       @name ||= eval('"' + f[:string] + '"')
     end
+  end
+
+  # Return user's initials based on name format
+  def initials(formatter = nil)
+    f = self.class.name_formatter(formatter)
+    format = f[:initials] || USER_FORMATS[:firstname_lastname][:initials]
+    initials = eval('"' + format + '"')
+    initials.upcase
   end
 
   def registered?
@@ -518,11 +547,17 @@ class User < Principal
   def self.find_by_login(login)
     login = Redmine::CodesetUtil.replace_invalid_utf8(login.to_s)
     if login.present?
+      users = where(:login => login)
       # First look for an exact match
-      user = where(:login => login).detect {|u| u.login == login}
+      user = users.detect {|u| u.login == login}
       unless user
         # Fail over to case-insensitive if none was found
-        user = find_by("LOWER(login) = ?", login.downcase)
+        if Redmine::Database.mysql? || Redmine::Database.sqlserver?
+          # MySQL and SQLServer are case-insensitive by default, we can search in the existing results
+          user = users.detect {|u| u.login.casecmp?(login)}
+        else
+          user = find_by("LOWER(login) = ?", login.downcase)
+        end
       end
       user
     end
@@ -643,7 +678,7 @@ class User < Principal
   def projects_by_role
     return @projects_by_role if @projects_by_role
 
-    result = Hash.new([])
+    result = Hash.new {|_h, _k| []}
     project_ids_by_role.each do |role, ids|
       result[role] = Project.where(:id => ids).to_a
     end
@@ -676,7 +711,7 @@ class User < Principal
         hash[role_id] << project_id
       end
 
-      result = Hash.new([])
+      result = Hash.new {|_h, _k| []}
       if hash.present?
         roles = Role.where(:id => hash.keys).to_a
         hash.each do |role_id, proj_ids|
@@ -715,6 +750,20 @@ class User < Principal
     end
   end
 
+  def admin?
+    if authorized_by_oauth?
+      # when signed in via oauth, the user only acts as admin when the admin scope is set
+      super and @oauth_scope.include?(:admin)
+    else
+      super
+    end
+  end
+
+  # true if the user has signed in via oauth
+  def authorized_by_oauth?
+    !@oauth_scope.nil?
+  end
+
   # Return true if the user is allowed to do the specified action on a specific context
   # Action can be:
   # * a parameter-like Hash (eg. :controller => 'projects', :action => 'edit')
@@ -735,7 +784,7 @@ class User < Principal
 
       roles.any? do |role|
         (context.is_public? || role.member?) &&
-        role.allowed_to?(action) &&
+        role.allowed_to?(action, @oauth_scope) &&
         (block ? yield(role, self) : true)
       end
     elsif context && context.is_a?(Array)
@@ -754,7 +803,7 @@ class User < Principal
       # authorize if user has at least one role that has this permission
       roles = self.roles.to_a | [builtin_role]
       roles.any? do |role|
-        role.allowed_to?(action) &&
+        role.allowed_to?(action, @oauth_scope) &&
         (block ? yield(role, self) : true)
       end
     else
@@ -828,6 +877,8 @@ class User < Principal
           is_or_belongs_to?(object.assigned_to) || is_or_belongs_to?(object.previous_assignee)
         when 'only_owner'
           object.author == self
+        when 'only_my_watches'
+          object.watched_by?(self)
         end
       when News
         # always send to project members except when mail_notification is set to 'none'

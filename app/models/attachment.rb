@@ -83,6 +83,13 @@ class Attachment < ApplicationRecord
   cattr_accessor :thumbnails_storage_path
   @@thumbnails_storage_path = File.join(Rails.root, "tmp", "thumbnails")
 
+  # Since markdownized previews can contain sensitive data, they should be
+  # stored under storage_path, which is expected to have appropriately
+  # restrictive permissions.
+  def self.markdownized_previews_storage_path
+    File.join(storage_path, 'derived_cache', 'markdownized_previews')
+  end
+
   before_create :files_to_final_location
   after_commit :delete_from_disk, :on => :destroy
   after_commit :reuse_existing_file_if_possible, :on => :create
@@ -220,7 +227,7 @@ class Attachment < ApplicationRecord
   end
 
   def image?
-    !!(self.filename =~ /\.(bmp|gif|jpg|jpe|jpeg|png|webp)$/i)
+    !!(self.filename =~ /\.(avif|bmp|gif|jpg|jpe|jpeg|png|webp)$/i)
   end
 
   def thumbnailable?
@@ -246,6 +253,7 @@ class Attachment < ApplicationRecord
       target = thumbnail_path(size)
 
       begin
+        # TODO: Stop passing the deprecated is_pdf flag in Redmine 7.0
         Redmine::Thumbnail.generate(self.diskfile, target, size, is_pdf?)
       rescue => e
         if logger
@@ -262,6 +270,12 @@ class Attachment < ApplicationRecord
   # Deletes all thumbnails
   def self.clear_thumbnails
     Dir.glob(File.join(thumbnails_storage_path, "*.thumb")).each do |file|
+      File.delete file
+    end
+  end
+
+  def self.clear_markdownized_previews
+    Dir.glob(File.join(markdownized_previews_storage_path, "*.md")).each do |file|
       File.delete file
     end
   end
@@ -296,6 +310,31 @@ class Attachment < ApplicationRecord
 
   def is_audio?
     Redmine::MimeType.is_type?('audio', filename)
+  end
+
+  def markdownized_previewable?
+    readable? && Redmine::Markdownizer.available? && Redmine::Markdownizer.supports?(filename)
+  end
+
+  def markdownized_preview_content
+    return nil unless markdownized_previewable?
+
+    target = markdownized_preview_cache_path
+    if Redmine::Markdownizer.convert(diskfile, target)
+      File.read(target, :mode => "rb")
+    end
+  rescue => e
+    if logger
+      logger.error(
+        "An error occured while generating markdownized preview for #{disk_filename} " \
+          "to #{target}\nException was: #{e.message}"
+      )
+    end
+    nil
+  end
+
+  def markdownized_preview_cache_path
+    File.join(self.class.markdownized_previews_storage_path, "#{digest}_#{filesize}.md")
   end
 
   def previewable?
@@ -529,6 +568,7 @@ class Attachment < ApplicationRecord
     Dir[thumbnail_path("*")].each do |thumb|
       File.delete(thumb)
     end
+    FileUtils.rm_f(markdownized_preview_cache_path)
   end
 
   def thumbnail_path(size)
@@ -541,7 +581,7 @@ class Attachment < ApplicationRecord
     just_filename = value.gsub(/\A.*(\\|\/)/m, '')
 
     # Finally, replace invalid characters with underscore
-    just_filename.gsub(/[\/\?\%\*\:\|\"\'<>\n\r]+/, '_')
+    just_filename.gsub(/[\/?%*:|"'<>\n\r]+/, '_')
   end
 
   # Returns the subdirectory in which the attachment will be saved
@@ -556,7 +596,7 @@ class Attachment < ApplicationRecord
     def create_diskfile(filename, directory=nil, &)
       timestamp = DateTime.now.strftime("%y%m%d%H%M%S")
       ascii = ''
-      if %r{^[a-zA-Z0-9_\.\-]*$}.match?(filename) && filename.length <= 50
+      if %r{^[a-zA-Z0-9_.-]*$}.match?(filename) && filename.length <= 50
         ascii = filename
       else
         ascii = ActiveSupport::Digest.hexdigest(filename)

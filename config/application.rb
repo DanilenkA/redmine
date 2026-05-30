@@ -32,6 +32,7 @@ module RedmineApp
 
     config.active_support.remove_deprecated_time_with_zone_name = true
     config.active_support.cache_format_version = 7.0
+    config.active_support.to_time_preserves_timezone = :zone
 
     config.active_record.store_full_sti_class = true
     config.active_record.default_timezone = :local
@@ -59,12 +60,13 @@ module RedmineApp
     config.i18n.enforce_available_locales = true
     config.i18n.fallbacks = true
     config.i18n.default_locale = 'en'
+    config.i18n.available_locales = Dir[Rails.root / 'config' / 'locales' / '*.yml'].map { |f| File.basename(f, '.yml').to_sym }
 
     # Configure the default encoding used in templates for Ruby 1.9.
     config.encoding = "utf-8"
 
     # Configure sensitive parameters which will be filtered from the log file.
-    config.filter_parameters += [:password]
+    config.filter_parameters += [:password, :salt, :twofa_totp_key]
 
     config.action_mailer.perform_deliveries = false
 

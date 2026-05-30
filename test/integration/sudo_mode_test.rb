@@ -190,7 +190,7 @@ class SudoModeTest < Redmine::IntegrationTest
     expire_sudo_mode!
     get '/my/account'
     assert_response :success
-    put('/my/account', :params => {:user => {:mail => 'newmail@test.com'}})
+    post('/my/account', :params => {:_method => 'put', :user => {:mail => 'newmail@test.com'}})
     assert_response :success
     assert_select 'h2', 'Confirm your password to continue'
     assert_select 'form[action="/my/account"]'
@@ -257,6 +257,14 @@ class SudoModeTest < Redmine::IntegrationTest
         assert_response :created
       end
     end
+  end
+
+  def test_sudo_mode_should_include_cache_control_no_store
+    log_user("admin", "admin")
+    expire_sudo_mode!
+    get '/settings'
+    assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
   end
 
   private

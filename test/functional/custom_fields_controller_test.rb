@@ -282,6 +282,23 @@ class CustomFieldsControllerTest < Redmine::ControllerTest
     assert_select '[name=?]', 'custom_field[full_width_layout]', 0
   end
 
+  def test_setting_ratio_interval_should_be_present_only_for_progressbar_format
+    get(
+      :new,
+      :params => {
+        :type => 'IssueCustomField',
+          :custom_field => {
+            :field_format => 'progressbar'
+          }
+      }
+    )
+    assert_response :success
+    assert_select '[name=?]', 'custom_field[ratio_interval]' do
+      assert_select 'option[value=?]', '5'
+      assert_select 'option[value=?][selected=?]', '10', 'selected'
+    end
+  end
+
   def test_new_js
     get(
       :new,
@@ -434,7 +451,7 @@ class CustomFieldsControllerTest < Redmine::ControllerTest
       )
       assert_response :found
     end
-    field = IssueCustomField.order("id desc").first
+    field = IssueCustomField.order(id: :desc).first
     assert_equal [1, 3], field.projects.map(&:id).sort
   end
 
@@ -503,7 +520,7 @@ class CustomFieldsControllerTest < Redmine::ControllerTest
       )
       assert_response :found
     end
-    field = IssueCustomField.order('id desc').first
+    field = IssueCustomField.order(id: :desc).first
     assert_equal 'Copy', field.name
     assert_equal ['enumeration1', 'enumeration2'], field.enumerations.pluck(:name).sort
     assert_equal [1, 2], field.enumerations.pluck(:position).sort

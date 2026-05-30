@@ -27,6 +27,7 @@ class AccountControllerTest < Redmine::ControllerTest
   def test_get_login
     get :login
     assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
 
     assert_select 'input[name=username][autocomplete=username]'
     assert_select 'input[name=password][autocomplete=current-password]'
@@ -288,9 +289,19 @@ class AccountControllerTest < Redmine::ControllerTest
     with_settings :self_registration => '3' do
       get :register
       assert_response :success
+      assert_includes @response.headers['Cache-Control'], 'no-store'
 
       assert_select 'input[name=?]', 'user[password]'
       assert_select 'input[name=?]', 'user[password_confirmation]'
+    end
+  end
+
+  def test_get_register_should_show_lastname_before_firstname_when_user_format_requires_it
+    with_settings :self_registration => '3', :user_format => 'lastname_firstname' do
+      get :register
+      assert_response :success
+
+      assert_operator @response.body.index('id="user_lastname"'), :<, @response.body.index('id="user_firstname"')
     end
   end
 
@@ -344,7 +355,7 @@ class AccountControllerTest < Redmine::ControllerTest
         )
         assert_redirected_to '/my/account'
       end
-      user = User.order('id DESC').first
+      user = User.order(id: :desc).first
       assert_equal 'register', user.login
       assert_equal 'John', user.firstname
       assert_equal 'Doe', user.lastname
@@ -352,6 +363,27 @@ class AccountControllerTest < Redmine::ControllerTest
       assert user.check_password?('secret123')
       assert user.active?
     end
+  end
+
+  def test_post_register_with_failure
+    post(
+      :register,
+      :params => {
+        :user => {
+          :login => 'register',
+          :password => 'secret123',
+          :password_confirmation => 'secret1234567890',
+          :firstname => 'John',
+          :lastname => 'Doe',
+          :mail => 'register@example.com'
+        }
+      }
+    )
+
+    assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
+
+    assert_select_error /Password doesn't match confirmation/i
   end
 
   def test_post_register_with_registration_off_should_redirect
@@ -419,7 +451,7 @@ class AccountControllerTest < Redmine::ControllerTest
         assert_redirected_to '/login'
       end
     end
-    token = Token.order('id DESC').first
+    token = Token.order(id: :desc).first
     assert_equal User.find(2), token.user
     assert_equal 'recovery', token.action
 
@@ -521,6 +553,7 @@ class AccountControllerTest < Redmine::ControllerTest
 
     get :lost_password
     assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
 
     assert_select 'input[type=hidden][name=token][value=?]', token.value
   end
@@ -657,5 +690,23 @@ class AccountControllerTest < Redmine::ControllerTest
         assert_redirected_to '/'
       end
     end
+  end
+
+  def test_validate_back_url
+    request.host = 'example.com'
+
+    assert_equal '/admin', @controller.send(:validate_back_url, 'http://example.com/admin')
+    assert_equal '/admin', @controller.send(:validate_back_url, 'http://dlopper:foo@example.com/admin')
+    assert_equal '/issues?query_id=1#top', @controller.send(:validate_back_url, 'http://example.com/issues?query_id=1#top')
+    assert_equal false, @controller.send(:validate_back_url, 'http://invalid.example.com/issues')
+  end
+
+  def test_validate_back_url_with_port
+    request.host = 'example.com:3000'
+
+    assert_equal '/admin', @controller.send(:validate_back_url, 'http://example.com:3000/admin')
+    assert_equal '/admin', @controller.send(:validate_back_url, 'http://dlopper:foo@example.com:3000/admin')
+    assert_equal '/issues?query_id=1#top', @controller.send(:validate_back_url, 'http://example.com:3000/issues?query_id=1#top')
+    assert_equal false, @controller.send(:validate_back_url, 'http://invalid.example.com:3000/issues')
   end
 end

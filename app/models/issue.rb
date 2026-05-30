@@ -21,10 +21,13 @@ class Issue < ApplicationRecord
   include Redmine::SafeAttributes
   include Redmine::Utils::DateCalculation
   include Redmine::I18n
+
   before_validation :default_assign, on: :create
+  before_validation :force_default_value_on_noneditable_custom_fields, on: :create
   before_validation :clear_disabled_fields
   before_save :set_parent_id
   include Redmine::NestedSet::IssueNestedSet
+  include Redmine::Reaction::Reactable
 
   belongs_to :project
   belongs_to :tracker
@@ -57,6 +60,8 @@ class Issue < ApplicationRecord
                             :author_key => :author_id
 
   acts_as_mentionable :attributes => ['description']
+  acts_as_webhookable
+  include Issue::Webhookable
 
   DONE_RATIO_OPTIONS = %w(issue_field issue_status)
 
@@ -99,7 +104,7 @@ class Issue < ApplicationRecord
   scope :assigned_to, (lambda do |arg|
     arg = Array(arg).uniq
     ids = arg.map {|p| p.is_a?(Principal) ? p.id : p}
-    ids += arg.select {|p| p.is_a?(User)}.map(&:group_ids).flatten.uniq
+    ids += arg.grep(User).map(&:group_ids).flatten.uniq
     ids.compact!
     ids.any? ? where(:assigned_to_id => ids) : none
   end)
@@ -188,6 +193,11 @@ class Issue < ApplicationRecord
     end
   end
 
+  # Returns true if user or current user is allowed to log time on the issue
+  def time_loggable?(user=User.current)
+    user.allowed_to?(:log_time, project) && (Setting.timelog_accept_closed_issues? || !closed?)
+  end
+
   # Returns true if user or current user is allowed to edit or add notes to the issue
   def editable?(user=User.current)
     attributes_editable?(user) || notes_addable?(user)
@@ -206,7 +216,7 @@ class Issue < ApplicationRecord
 
   # Overrides Redmine::Acts::Attachable::InstanceMethods#attachments_editable?
   def attachments_editable?(user=User.current)
-    attributes_editable?(user)
+    visible?(user) && attributes_editable?(user)
   end
 
   # Returns true if user or current user is allowed to add notes to the issue
@@ -221,7 +231,7 @@ class Issue < ApplicationRecord
 
   # Overrides Redmine::Acts::Attachable::InstanceMethods#attachments_deletable?
   def attachments_deletable?(user=User.current)
-    attributes_editable?(user)
+    visible?(user) && attributes_editable?(user)
   end
 
   def initialize(attributes=nil, *args)
@@ -263,7 +273,7 @@ class Issue < ApplicationRecord
   end
 
   alias :base_reload :reload
-  def reload(*args)
+  def reload(*)
     @workflow_rule_by_attribute = nil
     @assignable_versions = nil
     @relations = nil
@@ -272,7 +282,7 @@ class Issue < ApplicationRecord
     @total_estimated_hours = nil
     @last_updated_by = nil
     @last_notes = nil
-    base_reload(*args)
+    base_reload(*)
   end
 
   # Overrides Redmine::Acts::Customizable::InstanceMethods#available_custom_fields
@@ -301,9 +311,8 @@ class Issue < ApplicationRecord
         "created_on", "updated_on", "status_id", "closed_on"
       )
     self.custom_field_values =
-      issue.custom_field_values.inject({}) do |h, v|
-        h[v.custom_field_id] = v.value
-        h
+      issue.custom_field_values.to_h do |v|
+        [v.custom_field_id, v.value]
       end
     if options[:keep_status]
       self.status = issue.status
@@ -464,7 +473,7 @@ class Issue < ApplicationRecord
   end
 
   # Overrides assign_attributes so that project and tracker get assigned first
-  def assign_attributes(new_attributes, *args)
+  def assign_attributes(new_attributes, *)
     return if new_attributes.nil?
 
     attrs = new_attributes.dup
@@ -475,7 +484,7 @@ class Issue < ApplicationRecord
         send :"#{attr}=", attrs.delete(attr)
       end
     end
-    super(attrs, *args)
+    super(attrs, *)
   end
 
   def attributes=(new_attributes)
@@ -606,6 +615,11 @@ class Issue < ApplicationRecord
     end
     if new_record? && !statuses_allowed.include?(status)
       self.status = statuses_allowed.first || default_status
+    end
+    # Use the selected tracker's private default when the form has no explicit value.
+    if new_record? && tracker&.private_by_default? &&
+         !attrs.key?('is_private') && safe_attribute?('is_private', user)
+      attrs['is_private'] = '1'
     end
     if (u = attrs.delete('assigned_to_id')) && safe_attribute?('assigned_to_id')
       self.assigned_to_id = u
@@ -908,10 +922,13 @@ class Issue < ApplicationRecord
   # Returns the journals that are visible to user with their index
   # Used to display the issue history
   def visible_journals_with_index(user=User.current)
+    preloads = [:details, :updated_by]
+    preloads << (Setting.gravatar_enabled? ? {user: :email_address} : :user)
+
     result = journals.
-      preload(:details).
-      preload(:user => :email_address).
-      reorder(:created_on, :id).to_a
+      preload(*preloads).
+      reorder(:created_on, :id).
+      to_a
 
     result.each_with_index {|j, i| j.indice = i + 1}
 
@@ -922,6 +939,9 @@ class Issue < ApplicationRecord
     end
     Journal.preload_journals_details_custom_fields(result)
     result.select! {|journal| journal.notes? || journal.visible_details.any?}
+
+    Journal.preload_reaction_details(result)
+
     result
   end
 
@@ -1165,7 +1185,7 @@ class Issue < ApplicationRecord
       if leaf?
         spent_hours
       else
-        self_and_descendants.joins(:time_entries).sum("#{TimeEntry.table_name}.hours").to_f || 0.0
+        self_and_descendants.joins(:time_entries).sum("#{TimeEntry.table_name}.hours").to_f
       end
   end
 
@@ -1198,11 +1218,7 @@ class Issue < ApplicationRecord
   end
 
   def last_notes
-    if @last_notes
-      @last_notes
-    else
-      journals.visible.where.not(notes: '').reorder(:id => :desc).first.try(:notes)
-    end
+    @last_notes || journals.visible.where.not(notes: '').reorder(:id => :desc).first.try(:notes)
   end
 
   # Preloads relations for a collection of issues
@@ -1948,6 +1964,8 @@ class Issue < ApplicationRecord
     if current_journal && !attachment.new_record?
       current_journal.journalize_attachment(attachment, :removed)
       current_journal.save
+      # Attachment removal via AJAX saves only the journal, so the usual issue update callback does not fire.
+      Webhook.trigger(event_name('updated'), self) unless saved_changes?
     end
   end
 
@@ -2009,7 +2027,7 @@ class Issue < ApplicationRecord
   # Make sure updated_on is updated when adding a note and set updated_on now
   # so we can set closed_on with the same value on closing
   def force_updated_on_change
-    if @current_journal || changed?
+    if changed? || (@current_journal && !@current_journal.notes_and_details_empty?)
       self.updated_on = current_time_from_proper_timezone
       if new_record?
         self.created_on = updated_on
@@ -2091,6 +2109,21 @@ class Issue < ApplicationRecord
       end
       self.priority_id ||= IssuePriority.default&.id || IssuePriority.active.first&.id
       self.done_ratio ||= 0
+    end
+  end
+
+  # Forcefully set the default value to any custom field values which are not
+  # editable by the current user when creating a new issue. This may overwrite
+  # existing custom values of a copied issue which are not editable by the
+  # current user.
+  def force_default_value_on_noneditable_custom_fields
+    return unless custom_field_values_changed?
+
+    editable_custom_field_ids = editable_custom_fields(author).map(&:id)
+    custom_field_values.each do |field_value|
+      unless editable_custom_field_ids.include?(field_value.custom_field_id)
+        field_value.value = field_value.custom_field.default_value
+      end
     end
   end
 

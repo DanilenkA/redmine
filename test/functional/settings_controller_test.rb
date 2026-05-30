@@ -25,11 +25,6 @@ class SettingsControllerTest < Redmine::ControllerTest
     @request.session[:user_id] = 1 # admin
   end
 
-  def teardown
-    Setting.delete_all
-    Setting.clear_cache
-  end
-
   def test_index
     get :index
     assert_response :success
@@ -50,7 +45,7 @@ class SettingsControllerTest < Redmine::ControllerTest
       assert_response :success
     end
 
-    assert_select 'select[name=?]', 'settings[issue_list_default_columns][]' do
+    assert_select 'select#selected_settings_issue_list_default_columns' do
       assert_select 'option', 4
       assert_select 'option[value=tracker]', :text => 'Tracker'
       assert_select 'option[value=subject]', :text => 'Subject'
@@ -58,7 +53,7 @@ class SettingsControllerTest < Redmine::ControllerTest
       assert_select 'option[value=updated_on]', :text => 'Updated'
     end
 
-    assert_select 'select[name=?]', 'available_columns[]' do
+    assert_select 'select#available_settings_issue_list_default_columns' do
       assert_select 'option[value=tracker]', 0
       assert_select 'option[value=priority]', :text => 'Priority'
     end
@@ -144,6 +139,20 @@ class SettingsControllerTest < Redmine::ControllerTest
       ],
       Setting.commit_update_keywords
     )
+  end
+
+  def test_post_edit_should_clear_default_due_date_offset_when_disabled
+    with_settings :default_issue_due_date_offset => '5' do
+      post :edit, :params => {
+        :tab => 'issues',
+        :settings => {
+          :default_issue_due_date_offset_enabled => '0',
+          :default_issue_due_date_offset => '7'
+        }
+      }
+      assert_redirected_to '/settings?tab=issues'
+      assert_equal '', Setting.default_issue_due_date_offset
+    end
   end
 
   def test_post_edit_with_invalid_setting_should_not_error

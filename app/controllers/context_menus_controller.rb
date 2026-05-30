@@ -22,6 +22,7 @@ class ContextMenusController < ApplicationController
   helper :issues
 
   before_action :find_issues, :only => :issues
+  before_action :require_admin, :only => [:projects, :users]
 
   def issues
     if @issues.size == 1
@@ -33,7 +34,7 @@ class ContextMenusController < ApplicationController
 
     @can = {
       :edit => @issues.all?(&:attributes_editable?),
-      :log_time => (@project && User.current.allowed_to?(:log_time, @project)),
+      :log_time => @issue&.time_loggable?,
       :copy => User.current.allowed_to?(:copy_issues, @projects) && Issue.allowed_target_projects.any?,
       :add_watchers => User.current.allowed_to?(:add_issue_watchers, @projects),
       :delete => @issues.all?(&:deletable?),
@@ -46,6 +47,24 @@ class ContextMenusController < ApplicationController
 
     @priorities = IssuePriority.active.reverse
     @back = back_url
+    begin
+      # Recognize the controller and action from the back_url to determine
+      # which view triggered the context menu.
+      if relative_url_root.present? && back_url&.starts_with?(relative_url_root)
+        normalized_back_url = back_url.delete_prefix(relative_url_root)
+      else
+        normalized_back_url = back_url
+      end
+      route = Rails.application.routes.recognize_path(normalized_back_url)
+      @include_delete =
+        [
+          {controller: 'issues', action: 'index'},
+          {controller: 'gantts', action: 'show'},
+          {controller: 'calendars', action: 'show'}
+        ].any?(route.slice(:controller, :action))
+    rescue ActionController::RoutingError
+      @include_delete = false
+    end
 
     @columns = params[:c]
 
@@ -69,7 +88,11 @@ class ContextMenusController < ApplicationController
       preload(:project => :time_entry_activities).
       preload(:user).to_a
 
-    (render_404; return) unless @time_entries.present?
+    if @time_entries.blank? || !@time_entries.all?(&:visible?)
+      render_404;
+      return
+    end
+
     if @time_entries.size == 1
       @time_entry = @time_entries.first
     end
@@ -116,6 +139,11 @@ class ContextMenusController < ApplicationController
     if @users.size == 1
       @user = @users.first
     end
+
+    @groups = Group.givable.sorted.to_a
+    @common_group_ids = Group.givable.joins(:groups_users).where(groups_users: { user_id: @users.map(&:id) }).distinct.pluck(:id).to_set
+    @back = back_url
+
     render layout: false
   end
 end

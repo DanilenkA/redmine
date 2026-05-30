@@ -30,8 +30,14 @@ module Redmine
 
       # Relation types that are rendered
       DRAW_TYPES = {
-        IssueRelation::TYPE_BLOCKS   => {:landscape_margin => 16, :color => '#F34F4F'},
-        IssueRelation::TYPE_PRECEDES => {:landscape_margin => 20, :color => '#628FEA'}
+        IssueRelation::TYPE_BLOCKS   => {
+          :landscape_margin => 16,
+          :color => '#fa5252' # oc-red-6
+        },
+        IssueRelation::TYPE_PRECEDES => {
+          :landscape_margin => 20,
+          :color => '#228be6' # oc-blue-6
+        }
       }.freeze
 
       UNAVAILABLE_COLUMNS = [:tracker, :id, :subject]
@@ -87,7 +93,7 @@ module Redmine
         if options.has_key?(:max_rows)
           @max_rows = options[:max_rows]
         else
-          @max_rows = Setting.gantt_items_limit.blank? ? nil : Setting.gantt_items_limit.to_i
+          @max_rows = (Setting.gantt_items_limit.presence&.to_i)
         end
       end
 
@@ -198,12 +204,18 @@ module Redmine
 
       # Returns the distinct versions of the issues that belong to +project+
       def project_versions(project)
-        project_issues(project).filter_map(&:fixed_version).uniq
+        @project_versions ||= {}
+        @project_versions[project&.id] ||= begin
+          ids = project_issues(project).filter_map(&:fixed_version_id).uniq
+          Version.where(id: ids).to_a
+        end
       end
 
       # Returns the issues that belong to +project+ and are assigned to +version+
       def version_issues(project, version)
-        project_issues(project).select {|issue| issue.fixed_version == version}
+        @version_issues ||= {}
+        @version_issues[[project&.id, version&.id]] ||=
+          project_issues(project).select {|issue| issue.fixed_version_id == version&.id}
       end
 
       def render(options={})
@@ -232,7 +244,7 @@ module Redmine
         render_object_row(project, options)
         increment_indent(options) do
           # render issue that are not assigned to a version
-          issues = project_issues(project).select {|i| i.fixed_version.nil?}
+          issues = project_issues(project).select {|i| i.fixed_version_id.nil?}
           render_issues(issues, options)
           # then render project versions and their issues
           versions = project_versions(project)
@@ -347,7 +359,7 @@ module Redmine
           data_options = {}
           data_options[:collapse_expand] = "issue-#{issue.id}"
           data_options[:number_of_rows] = number_of_rows
-          style = "position: absolute;top: #{options[:top]}px; font-size: 0.8em;"
+          style = "position: absolute;inset-block-start: #{options[:top]}px; font-size: 0.8em;"
           content =
             view.content_tag(
               :div, view.column_content(options[:column], issue),
@@ -396,7 +408,15 @@ module Redmine
             Redmine::Configuration['rmagick_font_path'].presence
         img = MiniMagick::Image.create(".#{format}")
         if Redmine::Configuration['imagemagick_convert_command'].present?
-          MiniMagick.cli_path = File.dirname(Redmine::Configuration['imagemagick_convert_command'])
+          if MiniMagick.respond_to?(:cli_path)
+            MiniMagick.cli_path = File.dirname(Redmine::Configuration['imagemagick_convert_command'])
+          else
+            Rails.logger.warn(
+              'imagemagick_convert_command option is ignored ' \
+              'because MiniMagick has removed the option to define a custom path for the binary. ' \
+              'Please ensure the convert binary is available in your PATH.'
+            )
+          end
         end
         MiniMagick.convert do |gc|
           gc.size('%dx%d' % [subject_width + g_width + 1, height])
@@ -494,7 +514,7 @@ module Redmine
           lines(:image => gc, :top => top, :zoom => zoom,
                 :subject_width => subject_width, :format => :image)
           # today red line
-          if User.current.today >= @date_from and User.current.today <= date_to
+          if User.current.today.between?(@date_from, date_to)
             gc.stroke('red')
             x = (User.current.today - @date_from + 1) * zoom + subject_width
             gc.draw('line %g,%g %g,%g' % [
@@ -717,7 +737,7 @@ module Redmine
           css_classes = +''
           css_classes << ' issue-overdue' if issue.overdue?
           css_classes << ' issue-behind-schedule' if issue.behind_schedule?
-          css_classes << ' icon icon-issue' unless Setting.gravatar_enabled? && issue.assigned_to
+          css_classes << ' icon icon-issue' unless issue.assigned_to
           css_classes << ' issue-closed' if issue.closed?
           if issue.start_date && issue.due_before && issue.done_ratio
             progress_date = calc_progress_date(issue.start_date,
@@ -726,8 +746,8 @@ module Redmine
             css_classes << ' over-end-date' if progress_date > self.date_to && issue.done_ratio > 0
           end
           s = (+"").html_safe
-          s << view.sprite_icon('issue').html_safe unless Setting.gravatar_enabled? && issue.assigned_to
-          s << view.assignee_avatar(issue.assigned_to, :size => 13, :class => 'icon-gravatar')
+          s << view.sprite_icon('issue').html_safe unless issue.assigned_to
+          s << view.assignee_avatar(issue.assigned_to, :size => 13, :class => 'icon-avatar')
           s << view.link_to_issue(issue).html_safe
           s << view.content_tag(:input, nil, :type => 'checkbox', :name => 'ids[]',
                                 :value => issue.id, :style => 'display:none;',
@@ -740,7 +760,7 @@ module Redmine
           html_class << (version.behind_schedule? ? 'version-behind-schedule' : '') << " "
           html_class << (version.overdue? ? 'version-overdue' : '')
           html_class << ' version-closed' unless version.open?
-          if version.start_date && version.due_date && version.visible_fixed_issues.completed_percent
+          if version.due_date && version.start_date && version.visible_fixed_issues.completed_percent
             progress_date = calc_progress_date(version.start_date,
                                                version.due_date, version.visible_fixed_issues.completed_percent)
             html_class << ' behind-start-date' if progress_date < self.date_from
@@ -770,10 +790,14 @@ module Redmine
           tag_options[:id] = "issue-#{object.id}"
           tag_options[:class] = "issue-subject hascontextmenu"
           tag_options[:title] = object.subject
-          children = object.leaf? ? [] : object.children & project_issues(object.project)
           has_children =
-            children.present? &&
-              children.collect(&:fixed_version).uniq.intersect?([object.fixed_version])
+            if object.leaf?
+              false
+            else
+              children = object.children & project_issues(object.project)
+              fixed_version_id = object.fixed_version_id
+              children.any? {|child| child.fixed_version_id == fixed_version_id}
+            end
         when Version
           tag_options[:id] = "version-#{object.id}"
           tag_options[:class] = "version-name"
@@ -792,7 +816,10 @@ module Redmine
           }
         end
         if has_children
-          content = view.content_tag(:span, view.sprite_icon('angle-down').html_safe, :class => 'icon icon-expanded expander') + content
+          content = view.content_tag(:span,
+                                     view.sprite_icon('angle-down', rtl: true).html_safe,
+                                     :class => 'icon icon-expanded expander',
+                                     :data => {:action => 'click->gantt--subjects#handleEntryClick'}) + content
           tag_options[:class] += ' open'
         else
           if params[:indent]
@@ -800,7 +827,7 @@ module Redmine
             params[:indent] += 18
           end
         end
-        style = "position: absolute;top:#{params[:top]}px;left:#{params[:indent]}px;"
+        style = "position: absolute;inset-block-start:#{params[:top]}px;inset-inline-start:#{params[:indent]}px;"
         style += "width:#{params[:subject_width] - params[:indent]}px;" if params[:subject_width]
         tag_options[:style] = style
         output = view.content_tag(:div, content, tag_options)
@@ -863,8 +890,8 @@ module Redmine
         if coords[:bar_start] && coords[:bar_end]
           width = coords[:bar_end] - coords[:bar_start] - 2
           style = +""
-          style << "top:#{params[:top]}px;"
-          style << "left:#{coords[:bar_start]}px;"
+          style << "inset-block-start:#{params[:top]}px;"
+          style << "inset-inline-start:#{coords[:bar_start]}px;"
           style << "width:#{width}px;"
           html_id = "task-todo-issue-#{object.id}" if object.is_a?(Issue)
           html_id = "task-todo-version-#{object.id}" if object.is_a?(Version)
@@ -883,8 +910,8 @@ module Redmine
           if coords[:bar_late_end]
             width = coords[:bar_late_end] - coords[:bar_start] - 2
             style = +""
-            style << "top:#{params[:top]}px;"
-            style << "left:#{coords[:bar_start]}px;"
+            style << "inset-block-start:#{params[:top]}px;"
+            style << "inset-inline-start:#{coords[:bar_start]}px;"
             style << "width:#{width}px;"
             output << view.content_tag(:div, '&nbsp;'.html_safe,
                                        :style => style,
@@ -894,8 +921,8 @@ module Redmine
           if coords[:bar_progress_end]
             width = coords[:bar_progress_end] - coords[:bar_start] - 2
             style = +""
-            style << "top:#{params[:top]}px;"
-            style << "left:#{coords[:bar_start]}px;"
+            style << "inset-block-start:#{params[:top]}px;"
+            style << "inset-inline-start:#{coords[:bar_start]}px;"
             style << "width:#{width}px;"
             html_id = "task-done-issue-#{object.id}" if object.is_a?(Issue)
             html_id = "task-done-version-#{object.id}" if object.is_a?(Version)
@@ -910,8 +937,8 @@ module Redmine
         if markers
           if coords[:start]
             style = +""
-            style << "top:#{params[:top]}px;"
-            style << "left:#{coords[:start]}px;"
+            style << "inset-block-start:#{params[:top]}px;"
+            style << "inset-inline-start:#{coords[:start]}px;"
             style << "width:15px;"
             output << view.content_tag(:div, '&nbsp;'.html_safe,
                                        :style => style,
@@ -920,8 +947,8 @@ module Redmine
           end
           if coords[:end]
             style = +""
-            style << "top:#{params[:top]}px;"
-            style << "left:#{coords[:end]}px;"
+            style << "inset-block-start:#{params[:top]}px;"
+            style << "inset-inline-start:#{coords[:end]}px;"
             style << "width:15px;"
             output << view.content_tag(:div, '&nbsp;'.html_safe,
                                        :style => style,
@@ -932,8 +959,8 @@ module Redmine
         # Renders the label on the right
         if label
           style = +""
-          style << "top:#{params[:top]}px;"
-          style << "left:#{(coords[:bar_end] || 0) + 8}px;"
+          style << "inset-block-start:#{params[:top]}px;"
+          style << "inset-inline-start:#{(coords[:bar_end] || 0) + 8}px;"
           style << "width:15px;"
           output << view.content_tag(:div, label,
                                      :style => style,
@@ -950,8 +977,8 @@ module Redmine
                                 :class => 'toggle-selection')
           style = +""
           style << "position: absolute;"
-          style << "top:#{params[:top]}px;"
-          style << "left:#{coords[:bar_start]}px;"
+          style << "inset-block-start:#{params[:top]}px;"
+          style << "inset-inline-start:#{coords[:bar_start]}px;"
           style << "width:#{coords[:bar_end] - coords[:bar_start]}px;"
           style << "height:12px;"
           output << view.content_tag(:div, s.html_safe,

@@ -34,6 +34,8 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
       }
     )
     assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
+
     assert_select 'select[name=?]', 'repository_scm' do
       assert_select 'option[value=?][selected=selected]', 'Subversion'
     end
@@ -90,7 +92,7 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
       )
     end
     assert_response :found
-    repository = Repository.order('id DESC').first
+    repository = Repository.order(id: :desc).first
     assert_kind_of Repository::Subversion, repository
     assert_equal 'file:///test', repository.url
   end
@@ -110,9 +112,36 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
       )
     end
     assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
+
     assert_select_error /URL is invalid/
     assert_select 'select[name=?]', 'repository_scm' do
       assert_select 'option[value=?][selected=selected]', 'Subversion'
+    end
+  end
+
+  def test_create_should_reject_subversion_url_with_newline_injection
+    @request.session[:user_id] = 1
+    [
+      "file:///test\nfoo",
+      "svn+ssh://example.com/repo\r\nbar"
+    ].each do |injected_url|
+      assert_no_difference 'Repository.count', "expected #{injected_url.inspect} to be rejected" do
+        post(
+          :create,
+          :params => {
+            :project_id => 'subproject1',
+            :repository_scm => 'Subversion',
+            :repository => {
+              :url => injected_url,
+              :is_default => '1',
+              :identifier => ''
+            }
+          }
+        )
+      end
+      assert_response :success
+      assert_select_error /URL is invalid/
     end
   end
 
@@ -120,6 +149,8 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
     @request.session[:user_id] = 1
     get(:edit, :params => {:id => 11})
     assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
+
     assert_select 'input[name=?][value=?][disabled=disabled]', 'repository[url]', 'svn://localhost/test'
   end
 
@@ -150,6 +181,8 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
       }
     )
     assert_response :success
+    assert_includes @response.headers['Cache-Control'], 'no-store'
+
     assert_select_error /Password is too long/
   end
 
@@ -186,6 +219,7 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
 
   def test_show_without_main_repository_should_display_first_repository
     skip unless repository_configured?('subversion')
+    skip unless Repository::Subversion.scm_available
 
     project = Project.find(1)
     repos = project.repositories
@@ -208,6 +242,7 @@ class RepositoriesControllerTest < Redmine::RepositoryControllerTest
 
   def test_show_should_show_diff_button_depending_on_browse_repository_permission
     skip unless repository_configured?('subversion')
+    skip unless Repository::Subversion.scm_available
 
     @request.session[:user_id] = 2
     role = Role.find(1)

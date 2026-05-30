@@ -120,7 +120,7 @@ class TimeEntryQuery < Query
     ) if project.nil? || !project.leaf?
 
     add_available_filter "comments", :type => :text
-    add_available_filter "hours", :type => :float
+    add_available_filter "hours", :type => :hour
 
     add_custom_fields_filters(time_entry_custom_fields)
     add_associations_custom_fields_filters :project
@@ -164,12 +164,19 @@ class TimeEntryQuery < Query
   end
 
   def base_scope
-    TimeEntry.visible.
-      joins(:project, :user).
-      includes(:activity).
-      references(:activity).
-      left_join_issue.
-      where(statement)
+    scope = TimeEntry.visible
+                     .joins(:project, :user)
+                     .includes(:activity)
+                     .references(:activity)
+                     .left_join_issue
+                     .where(statement)
+
+    if Redmine::Database.mysql? && ActiveRecord::Base.connection.supports_optimizer_hints?
+      # Provides MySQL with a hint to use a better join order and avoid slow response times
+      scope.optimizer_hints('JOIN_ORDER(time_entries, projects, users)')
+    else
+      scope
+    end
   end
 
   def results_scope(options={})
@@ -244,6 +251,10 @@ class TimeEntryQuery < Query
     else
       sql_for_field("parent_id", operator, value, Issue.table_name, "parent_id")
     end
+  end
+
+  def sql_for_hours_field(field, operator, value)
+    sql_for_field("hours", operator, value.map(&:to_hours), TimeEntry.table_name, "hours")
   end
 
   def sql_for_activity_id_field(field, operator, value)

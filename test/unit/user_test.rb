@@ -317,7 +317,7 @@ class UserTest < ActiveSupport::TestCase
     assert_difference 'JournalDetail.count' do
       issue.save!
     end
-    journal_detail = JournalDetail.order('id DESC').first
+    journal_detail = JournalDetail.order(id: :desc).first
     assert_equal '2', journal_detail.old_value
 
     User.find(2).destroy
@@ -333,7 +333,7 @@ class UserTest < ActiveSupport::TestCase
     assert_difference 'JournalDetail.count' do
       issue.save!
     end
-    journal_detail = JournalDetail.order('id DESC').first
+    journal_detail = JournalDetail.order(id: :desc).first
     assert_equal '2', journal_detail.value
 
     User.find(2).destroy
@@ -589,6 +589,27 @@ class UserTest < ActiveSupport::TestCase
     end
   end
 
+  def test_initials_format
+    assert_equal 'JS', @jsmith.initials(:firstname_lastinitial)
+    assert_equal 'SJ', @jsmith.initials(:lastname_comma_firstname)
+    assert_equal 'SJ', @jsmith.initials(:lastname_firstname)
+    assert_equal 'JS', @jsmith.initials(:firstinitial_lastname)
+    assert_equal 'JL', User.new(:firstname => 'Jean-Philippe', :lastname => 'Lang').initials(:firstinitial_lastname)
+    assert_equal 'JS', @jsmith.initials(:undefined_format)
+  end
+
+  def test_initials_should_use_setting_as_default_format
+    with_settings :user_format => :firstname_lastname do
+      assert_equal 'JS', @jsmith.reload.initials
+    end
+    with_settings :user_format => :username do
+      assert_equal 'JS', @jsmith.reload.initials
+    end
+    with_settings :user_format => :lastname do
+      assert_equal 'SM', @jsmith.reload.initials
+    end
+  end
+
   def test_lastname_should_accept_255_characters
     u = User.first
     u.lastname = 'a' * 255
@@ -668,6 +689,19 @@ class UserTest < ActiveSupport::TestCase
       assert_equal ['users.firstname', 'users.lastname', 'users.id'],
                    User.fields_for_order_statement
     end
+  end
+
+  def test_lastname_before_firstname_should_return_true_with_lastname_firstname_format
+    assert User.lastname_before_firstname?(:lastname_firstname)
+  end
+
+  def test_lastname_before_firstname_should_return_false_with_firstname_lastname_format
+    assert_not User.lastname_before_firstname?(:firstname_lastname)
+  end
+
+  def test_lastname_before_firstname_should_return_false_with_format_without_both_name_parts
+    assert_not User.lastname_before_firstname?(:username)
+    assert_not User.lastname_before_firstname?(:lastname)
   end
 
   test ".try_to_login with good credentials should return the user" do
@@ -1055,15 +1089,15 @@ class UserTest < ActiveSupport::TestCase
 
   def test_valid_notification_options
     # without memberships
-    assert_equal 5, User.find(7).valid_notification_options.size
+    assert_equal 6, User.find(7).valid_notification_options.size
     # with memberships
-    assert_equal 6, User.find(2).valid_notification_options.size
+    assert_equal 7, User.find(2).valid_notification_options.size
   end
 
   def test_valid_notification_options_class_method
-    assert_equal 5, User.valid_notification_options.size
-    assert_equal 5, User.valid_notification_options(User.find(7)).size
-    assert_equal 6, User.valid_notification_options(User.find(2)).size
+    assert_equal 6, User.valid_notification_options.size
+    assert_equal 6, User.valid_notification_options(User.find(7)).size
+    assert_equal 7, User.valid_notification_options(User.find(2)).size
   end
 
   def test_notified_project_ids_setter_should_coerce_to_unique_integer_array
@@ -1374,6 +1408,79 @@ class UserTest < ActiveSupport::TestCase
 
     assert_difference 'User.count', -2 do
       User.prune(7)
+    end
+  end
+
+  def test_should_recognize_authorized_by_oauth
+    u = User.find 2
+    assert_not u.authorized_by_oauth?
+    u.oauth_scope = [:add_issues, :view_issues]
+    assert u.authorized_by_oauth?
+  end
+
+  def test_admin_should_be_limited_by_oauth_scope
+    u = User.find_by_admin(true)
+    assert u.admin?
+
+    u.oauth_scope = [:add_issues, :view_issues]
+    assert_not u.admin?
+
+    u.oauth_scope = [:add_issues, :view_issues, :admin]
+    assert u.admin?
+
+    u = User.find_by_admin(false)
+    assert_not u.admin?
+    u.oauth_scope = [:add_issues, :view_issues, :admin]
+    assert_not u.admin?
+  end
+
+  def test_oauth_scope_should_limit_global_user_permissions
+    admin = User.find 1
+    user = User.find 2
+    [admin, user].each do |u|
+      assert u.allowed_to?(:add_issues, nil, global: true)
+      assert u.allowed_to?(:view_issues, nil, global: true)
+      u.oauth_scope = [:view_issues]
+      assert_not u.allowed_to?(:add_issues, nil, global: true)
+      assert u.allowed_to?(:view_issues, nil, global: true)
+    end
+  end
+
+  def test_oauth_scope_should_limit_project_user_permissions
+    admin = User.find 1
+    project = Project.find 5
+    assert admin.allowed_to?(:add_issues, project)
+    assert admin.allowed_to?(:view_issues, project)
+    admin.oauth_scope = [:view_issues]
+    assert_not admin.allowed_to?(:add_issues, project)
+    assert admin.allowed_to?(:view_issues, project)
+
+    admin.oauth_scope = [:view_issues, :admin]
+    assert admin.allowed_to?(:add_issues, project)
+    assert admin.allowed_to?(:view_issues, project)
+
+    user = User.find 2
+    project = Project.find 1
+    assert user.allowed_to?(:add_issues, project)
+    assert user.allowed_to?(:view_issues, project)
+    user.oauth_scope = [:view_issues]
+    assert_not user.allowed_to?(:add_issues, project)
+    assert user.allowed_to?(:view_issues, project)
+
+    user.oauth_scope = [:view_issues, :admin]
+    assert_not user.allowed_to?(:add_issues, project)
+    assert user.allowed_to?(:view_issues, project)
+  end
+
+  def test_destroy_should_delete_associated_reactions
+    users(:users_004).reactions.create!(
+      [
+        {reactable: issues(:issues_001)},
+        {reactable: issues(:issues_002)}
+      ]
+    )
+    assert_difference 'Reaction.count', -2 do
+      users(:users_004).destroy
     end
   end
 end

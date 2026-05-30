@@ -188,7 +188,7 @@
         <p>Исключения:</p>
 
         <ul>
-          <li>Вы можете отменить обработку ссылок с помощью восклицательного знака перед ссылкой: !http://foo.bar</li>
+          <li>Вы можете отменить обработку ссылок с помощью восклицательного знака перед ссылкой: !http://example.com</li>
         </ul>
 
 <h3><a name="4" class="wiki-page"></a>Внешние ссылки</h3>
@@ -196,11 +196,11 @@
 <p>URLs (starting with: www, http, https, ftp, ftps, sftp and sftps) and email addresses are automatically turned into clickable links:</p>
 
 <pre>
-https://www.redmine.org, someone@foo.bar
+https://www.redmine.org, someone@example.com
 </pre>
 
 <p>выводится: <a class="external" href="https://www.redmine.org">https://www.redmine.org</a>, <a
-        href="mailto:someone@foo.bar" class="email">someone@foo.bar</a></p>
+        href="mailto:someone@example.com" class="email">someone@example.com</a></p>
 
 <p>Если же вы хотите, чтобы отобразился текст вместо адреса URL, вы можете испольовать стандартный синтаксис
     форматирования текста:</p>
@@ -339,6 +339,22 @@ bq. Rails - это полноценный, многоуровневый фрей
       <dd><p>Отображет кликабельный эскиз приложенной картинки. Пример:</p>
       <pre>{{thumbnail(image.png)}}
 {{thumbnail(image.png, size=300, title=Эскиз)}}</pre></dd>
+
+      <dt><code>issue</code></dt>
+      <dd><p>Inserts a link to an issue with flexible text. Examples:</p>
+        <pre>{{issue(123)}}                              -- Issue #123: Enhance macro capabilities
+{{issue(123, project=true)}}                -- Andromeda - Issue #123:Enhance macro capabilities
+{{issue(123, tracker=false)}}               -- #123: Enhance macro capabilities
+{{issue(123, subject=false, project=true)}} -- Andromeda - Issue #123</pre></dd>
+
+      <dt><code>recent_pages</code></dt>
+      <dd><p>Displays a list of recently updated wiki pages. With no argument, it displays pages that have been updated within the last 7 days. Examples:</p>
+        <pre>{{recent_pages}}            -- displays pages updated within the last 7 days
+{{recent_pages(days=3)}}    -- displays pages updated within the last 3 days
+{{recent_pages(limit=5)}}   -- limits the maximum number of pages to display to 5
+{{recent_pages(time=true)}} -- displays pages updated within the last 7 days with updated time
+{{recent_pages(project=identifier)}} -- displays pages updated within the last 7 days from a specific project
+{{recent_pages(include_subprojects=true)}} -- includes pages from subprojects</pre></dd>
     </dl>
     </p>
 

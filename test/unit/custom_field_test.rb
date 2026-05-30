@@ -48,6 +48,15 @@ class CustomFieldTest < ActiveSupport::TestCase
     assert field.save
   end
 
+  def test_regexp_validation_with_invalid_regex_and_default_value
+    field = IssueCustomField.new(:name => 'regexp', :field_format => 'text', :regexp => '[', :default_value => 'abc')
+    assert !field.save
+    assert_include I18n.t('activerecord.errors.messages.invalid'),
+                   field.errors[:regexp]
+    field.regexp = '[a-z0-9]'
+    assert field.save
+  end
+
   def test_default_value_should_be_validated
     field = CustomField.new(:name => 'Test', :field_format => 'int')
     field.default_value = 'abc'
@@ -316,7 +325,7 @@ class CustomFieldTest < ActiveSupport::TestCase
     user = User.generate!
     User.add_to_project(user, Project.first, Role.find(3))
 
-    assert_equal [fields[0], fields[2]], CustomField.visible(user).order("id").to_a
+    assert_equal [fields[0], fields[2]], CustomField.visible(user).order(:id).to_a
   end
 
   def test_visibile_scope_with_anonymous_user_should_return_visible_custom_fields
@@ -328,7 +337,7 @@ class CustomFieldTest < ActiveSupport::TestCase
       CustomField.generate!(:visible => false, :role_ids => [1, 2]),
     ]
 
-    assert_equal [fields[0]], CustomField.visible(User.anonymous).order("id").to_a
+    assert_equal [fields[0]], CustomField.visible(User.anonymous).order(:id).to_a
   end
 
   def test_float_cast_blank_value_should_return_nil

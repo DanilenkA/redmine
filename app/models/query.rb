@@ -343,6 +343,7 @@ class Query < ApplicationRecord
     :search => [ "~", "*~", "!~" ],
     :integer => [ "=", ">=", "<=", "><", "!*", "*" ],
     :float => [ "=", ">=", "<=", "><", "!*", "*" ],
+    :hour => [ "=", ">=", "<=", "><", "!*", "*" ],
     :relation => ["=", "!", "=p", "=!p", "!p", "*o", "!o", "!*", "*"],
     :tree => ["=", "~", "!*", "*"]
   }
@@ -354,6 +355,8 @@ class Query < ApplicationRecord
 
   # Permission required to view the queries, set on subclasses.
   class_attribute :view_permission
+
+  class_attribute :layout, default: 'base'
 
   # Scope of queries that are global or on the given project
   scope :global_or_on_project, (lambda do |project|
@@ -502,6 +505,17 @@ class Query < ApplicationRecord
           if values_for(field).detect {|v| v.present? && !/\A[+-]?\d+(\.\d*)?\z/.match?(v)}
             add_filter_error(field, :invalid)
           end
+        when :hour
+          case operator_for(field)
+          when "><"
+            unless values_for(field).all? {|v| v.present? && !v.to_s.to_hours.nil? }
+              add_filter_error(field, :invalid)
+            end
+          when "=", ">=", "<="
+            if values_for(field).detect {|v| v.present? && v.to_s.to_hours.nil? }
+              add_filter_error(field, :invalid)
+            end
+          end
         when :date, :date_past
           case operator_for(field)
           when "=", ">=", "<=", "><"
@@ -549,7 +563,7 @@ class Query < ApplicationRecord
 
   # Returns a hash of localized labels for all filter operators
   def self.operators_labels
-    operators.inject({}) {|h, operator| h[operator.first] = l(*operator.last); h}
+    operators.transform_values {|label| l(*label)}
   end
 
   # Returns a representation of the available filters for JSON serialization
@@ -621,7 +635,7 @@ class Query < ApplicationRecord
   end
 
   def users
-    principals.select {|p| p.is_a?(User)}
+    principals.grep(User)
   end
 
   def author_values
@@ -797,9 +811,8 @@ class Query < ApplicationRecord
 
   # Returns a Hash of columns and the key for sorting
   def sortable_columns
-    available_columns.inject({}) do |h, column|
-      h[column.name.to_s] = column.sortable
-      h
+    available_columns.to_h do |column|
+      [column.name.to_s, column.sortable]
     end
   end
 
@@ -1004,7 +1017,7 @@ class Query < ApplicationRecord
         end
       end
 
-      if field == 'project_id' || (self.type == 'ProjectQuery' && %w[id parent_id].include?(field))
+      if field == 'project_id' || (is_a?(ProjectQuery) && %w[id parent_id].include?(field))
         if v.delete('mine')
           v += User.current.memberships.pluck(:project_id).map(&:to_s)
         end
@@ -1103,7 +1116,7 @@ class Query < ApplicationRecord
       r = yield base_group_scope
       c = group_by_column
       if c.is_a?(QueryCustomFieldColumn)
-        r = r.keys.inject({}) {|h, k| h[c.custom_field.cast_value(k)] = r[k]; h}
+        r = r.keys.to_h { |k| [c.custom_field.cast_value(k), r[k]] }
       end
     end
     r
@@ -1252,7 +1265,7 @@ class Query < ApplicationRecord
           else
             sql = "1=0"
           end
-        when :float
+        when :float, :hour
           if is_custom_filter
             sql =
               "(#{db_table}.#{db_field} <> '' AND " \
@@ -1446,6 +1459,7 @@ class Query < ApplicationRecord
       sql = sql_contains("#{db_table}.#{db_field}", value.first)
     when "!~"
       sql = sql_contains("#{db_table}.#{db_field}", value.first, :match => false)
+      sql += " OR #{db_table}.#{db_field} IS NULL" if is_custom_filter
     when "*~"
       sql = sql_contains("#{db_table}.#{db_field}", value.first, :all_words => false)
     when "^"

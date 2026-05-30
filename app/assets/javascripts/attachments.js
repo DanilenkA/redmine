@@ -5,9 +5,13 @@
  */
 
 function addFile(inputEl, file, eagerUpload) {
-  var attachmentsFields = $(inputEl).closest('.attachments_form').find('.attachments_fields');
-  var addAttachment = $(inputEl).closest('.attachments_form').find('.add_attachment');
+  var attachmentsForm = $(inputEl).closest('.attachments_form')
+  var attachmentsFields = attachmentsForm.find('.attachments_fields');
+  var attachmentsIcons = attachmentsForm.find('.attachments_icons');
+  var addAttachment = attachmentsForm.find('.add_attachment');
   var maxFiles = ($(inputEl).attr('multiple') == 'multiple' ? 10 : 1);
+  var delIcon = attachmentsIcons.find('svg.svg-del').clone();
+  var attachmentIcon = attachmentsIcons.find('svg.svg-attachment').clone();
 
   if (attachmentsFields.children().length < maxFiles) {
     var attachmentId = addFile.nextAttachmentId++;
@@ -16,11 +20,13 @@ function addFile(inputEl, file, eagerUpload) {
     if (!param) {param = 'attachments'};
 
     fileSpan.append(
+        attachmentIcon,
         $('<input>', { type: 'text', 'class': 'icon icon-attachment filename readonly', name: param +'[' + attachmentId + '][filename]', readonly: 'readonly'} ).val(file.name),
         $('<input>', { type: 'text', 'class': 'description', name: param + '[' + attachmentId + '][description]', maxlength: 255, placeholder: $(inputEl).data('description-placeholder') } ).toggle(!eagerUpload),
         $('<input>', { type: 'hidden', 'class': 'token', name: param + '[' + attachmentId + '][token]'} ),
-        $('<a>&nbsp</a>').attr({ href: "#", 'class': 'icon-only icon-del remove-upload' }).click(removeFile).toggle(!eagerUpload)
+        $('<a>', { href: "#", 'class': 'icon-only icon-del remove-upload' }).append(delIcon).click(removeFile).toggle(!eagerUpload)
     ).appendTo(attachmentsFields);
+
 
     if ($(inputEl).data('description') == 0) {
       fileSpan.find('input.description').remove();
@@ -39,10 +45,13 @@ function addFile(inputEl, file, eagerUpload) {
 addFile.nextAttachmentId = 1;
 
 function ajaxUpload(file, attachmentId, fileSpan, inputEl) {
+  let attachmentIcon = $(fileSpan).find('svg.svg-attachment');
 
   function onLoadstart(e) {
     fileSpan.removeClass('ajax-waiting');
     fileSpan.addClass('ajax-loading');
+    attachmentIcon.addClass('svg-loader');
+    updateSVGIcon(attachmentIcon[0], 'loader')
     $('input:submit', $(this).parents('form')).attr('disabled', 'disabled');
   }
 
@@ -63,13 +72,17 @@ function ajaxUpload(file, attachmentId, fileSpan, inputEl) {
       .done(function(result) {
         addInlineAttachmentMarkup(file);
         progressSpan.progressbar( 'value', 100 ).remove();
-        fileSpan.find('input.description, a').css('display', 'inline-block');
+        fileSpan.find('input.description, a').css('display', 'inline-flex');
+        updateSVGIcon(attachmentIcon[0], 'file');
       })
       .fail(function(result) {
-        progressSpan.text(result.statusText);
+        $('<span>').insertAfter(progressSpan).text(result.statusText);
+        progressSpan.remove();
+        updateSVGIcon(attachmentIcon[0], 'warning');
       }).always(function() {
         ajaxUpload.uploading--;
         fileSpan.removeClass('ajax-loading');
+        attachmentIcon.removeClass('svg-loader');
         var form = fileSpan.parents('form');
         if (form.queue('upload').length == 0 && ajaxUpload.uploading == 0) {
           $('input:submit', form).removeAttr('disabled');
@@ -81,6 +94,7 @@ function ajaxUpload(file, attachmentId, fileSpan, inputEl) {
   var progressSpan = $('<div>').insertAfter(fileSpan.find('input.filename'));
   progressSpan.progressbar();
   fileSpan.addClass('ajax-waiting');
+  updateSVGIcon(attachmentIcon[0], 'hourglass');
 
   var maxSyncUpload = $(inputEl).data('max-concurrent-uploads');
 
@@ -301,14 +315,14 @@ function addInlineAttachmentMarkup(file) {
           + (newLineAfter ? '\n' : '')
           + description.substring(cursorPosition, description.length)
         );
-      })
 
-    // move cursor into next line
-    cursorPosition = $textarea.prop('selectionStart');
-    $textarea.prop({
-      'selectionStart': cursorPosition + 1,
-      'selectionEnd': cursorPosition + 1
-    });
+        // Move cursor after the inserted markup
+        var newCursorPosition = cursorPosition + (newLineBefore ? 1 : 0) + imageMarkup.length;
+        $textarea.prop({
+          'selectionStart': newCursorPosition + 1,
+          'selectionEnd': newCursorPosition + 1
+        });
+      });
 
   }
 }

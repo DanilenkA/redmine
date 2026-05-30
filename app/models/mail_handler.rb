@@ -55,8 +55,8 @@ class MailHandler < ActionMailer::Base
   end
 
   # Receives an email and rescues any exception
-  def self.safe_receive(*args)
-    receive(*args)
+  def self.safe_receive(*)
+    receive(*)
   rescue => e
     Rails.logger.error "MailHandler: an unexpected error occurred when receiving email: #{e.message}"
     return false
@@ -214,6 +214,8 @@ class MailHandler < ActionMailer::Base
     end
     issue.description = cleaned_up_text_body
     issue.start_date ||= User.current.today if Setting.default_issue_start_date_to_creation_date?
+    offset = Setting.default_issue_due_date_offset_in_days
+    issue.due_date ||= User.current.today + offset if offset
     if handler_options[:issue][:is_private] == '1'
       issue.is_private = true
     end

@@ -178,7 +178,7 @@ class IssueTest < ActiveSupport::TestCase
       assert Issue.new(:project_id => 2, :tracker_id => 1, :author_id => 1,
                        :subject => 'Group assignment',
                        :assigned_to_id => 11).save
-      issue = Issue.order('id DESC').first
+      issue = Issue.order(id: :desc).first
       assert_kind_of Group, issue.assigned_to
       assert_equal Group.find(11), issue.assigned_to
     end
@@ -748,7 +748,7 @@ class IssueTest < ActiveSupport::TestCase
       issue.save!
       assert_nil issue.due_date
     end
-    journal = Journal.order('id DESC').first
+    journal = Journal.order(id: :desc).first
     details = journal.details.select {|d| d.prop_key == 'due_date'}
     assert_equal 1, details.count
   end
@@ -758,7 +758,7 @@ class IssueTest < ActiveSupport::TestCase
     issue.custom_field_values = {'2' => 'Foo'}
     issue.save!
 
-    issue = Issue.order('id desc').first
+    issue = Issue.order(id: :desc).first
     assert_equal 'Foo', issue.custom_field_value(2)
 
     issue.custom_field_values = {'2' => 'Bar'}
@@ -1575,6 +1575,19 @@ class IssueTest < ActiveSupport::TestCase
     assert_equal 'relation', j.details[0].property
   end
 
+  def test_copy_should_only_copy_editable_custom_fields
+    cf = CustomField.find 1
+    cf.roles << Role.find(1)
+    cf.visible = false
+    cf.save!
+
+    User.current = User.find(3)
+    issue = Issue.new.copy_from(Issue.find(3))
+
+    assert issue.save
+    assert_equal '', issue.custom_field_value(1)
+  end
+
   def test_should_not_call_after_project_change_on_creation
     issue = Issue.new(:project_id => 1, :tracker_id => 1, :status_id => 1,
                       :subject => 'Test', :author_id => 1)
@@ -1608,6 +1621,19 @@ class IssueTest < ActiveSupport::TestCase
     issue.reload
 
     assert_not_equal updated_on_was, issue.updated_on
+  end
+
+  def test_adding_journal_with_notes_and_details_empty_should_not_update_timestamp
+    issue = Issue.find(1)
+    updated_on_was = issue.updated_on
+
+    issue.init_journal(User.first)
+    assert_no_difference 'Journal.count' do
+      assert issue.save
+    end
+    issue.reload
+
+    assert_equal updated_on_was, issue.updated_on
   end
 
   def test_should_close_duplicates
@@ -2821,7 +2847,7 @@ class IssueTest < ActiveSupport::TestCase
       end
     end
 
-    detail = JournalDetail.order('id DESC').first
+    detail = JournalDetail.order(id: :desc).first
     assert_equal i, detail.journal.journalized
     assert_equal 'attr', detail.property
     assert_equal 'description', detail.prop_key
@@ -3614,5 +3640,27 @@ class IssueTest < ActiveSupport::TestCase
   def test_like_should_tokenize
     r = Issue.like('issue today')
     assert_include Issue.find(7), r
+  end
+
+  def test_attachments_editable_should_check_issue_visibility
+    # private issue
+    i = Issue.find(14)
+
+    # user jsmith has permission to view issue
+    assert i.attachments_editable?(User.find(2))
+
+    # user dlopper does not have permission to view issue
+    assert_not i.attachments_editable?(User.find(3))
+  end
+
+  def test_attachments_deletable_should_check_issue_visibility
+    # private issue
+    i = Issue.find(14)
+
+    # user jsmith has permission to view issue
+    assert i.attachments_deletable?(User.find(2))
+
+    # user dlopper does not have permission to view issue
+    assert_not i.attachments_deletable?(User.find(3))
   end
 end

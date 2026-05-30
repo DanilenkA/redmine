@@ -46,6 +46,7 @@ class TimeEntry < ApplicationRecord
   acts_as_activity_provider :timestamp => "#{table_name}.created_on",
                             :author_key => :user_id,
                             :scope => proc {joins(:project).preload(:project)}
+  acts_as_webhookable
 
   validates_presence_of :author_id, :user_id, :activity_id, :project_id, :hours, :spent_on
   validates_presence_of :issue_id, :if => lambda {Setting.timelog_required_fields.include?('issue_id')}
@@ -77,6 +78,10 @@ class TimeEntry < ApplicationRecord
   safe_attributes 'user_id', 'hours', 'comments', 'project_id',
                   'issue_id', 'activity_id', 'spent_on',
                   'custom_field_values', 'custom_fields'
+
+  def webhook_payload_api_template
+    "app/views/timelog/show.api.rsb"
+  end
 
   # Returns a SQL conditions string used to find all time entries visible by the specified user
   def self.visible_condition(user, options={})
@@ -182,6 +187,9 @@ class TimeEntry < ApplicationRecord
     if spent_on && spent_on_changed? && user
       errors.add :base, I18n.t(:error_spent_on_future_date) if !Setting.timelog_accept_future_dates? && (spent_on > user.today)
     end
+    if !Setting.timelog_accept_closed_issues? && issue&.closed? && issue.was_closed?
+      errors.add :base, I18n.t(:error_spent_on_closed_issue)
+    end
   end
 
   def hours=(h)
@@ -240,8 +248,11 @@ class TimeEntry < ApplicationRecord
   def assignable_users
     users = []
     if project
-      users = project.members.active.preload(:user)
-      users = users.map(&:user).select{|u| u.allowed_to?(:log_time, project)}
+      user_ids =
+        project.members.active.preload(:roles).filter_map do |m|
+          m.roles.any? {|role| role.allowed_to?(:log_time)} ? m.user_id : nil
+        end.uniq
+      users = User.where(:id => user_ids).sorted.to_a
     end
     users << User.current if User.current.logged? && !users.include?(User.current)
     users

@@ -41,6 +41,7 @@ class RepositoriesGitControllerTest < Redmine::RepositoryControllerTest
           :path_encoding => 'ISO-8859-1'
         )
     assert @repository
+    skip "SCM command is unavailable" unless @repository.class.scm_available
   end
 
   def test_create_and_update
@@ -61,7 +62,7 @@ class RepositoriesGitControllerTest < Redmine::RepositoryControllerTest
       )
     end
     assert_response :found
-    repository = Repository.order('id DESC').first
+    repository = Repository.order(id: :desc).first
     assert_kind_of Repository::Git, repository
     assert_equal '/test', repository.url
     assert_equal true, repository.report_last_commit

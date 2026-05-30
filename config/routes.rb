@@ -18,6 +18,11 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 Rails.application.routes.draw do
+  use_doorkeeper do
+    controllers :applications => 'oauth2_applications'
+  end
+
+  root :to => 'welcome#index'
   root :to => 'welcome#index', :as => 'home'
 
   match 'login', :to => 'account#login', :as => 'signin', :via => [:get, :post]
@@ -29,6 +34,8 @@ Rails.application.routes.draw do
   match 'account/lost_password', :to => 'account#lost_password', :via => [:get, :post], :as => 'lost_password'
   match 'account/activate', :to => 'account#activate', :via => :get
   get 'account/activation_email', :to => 'account#activation_email', :as => 'activation_email'
+
+  resources :webhooks, only: [:index, :new, :create, :edit, :update, :destroy]
 
   match '/news/preview', :controller => 'previews', :action => 'news', :as => 'preview_news', :via => [:get, :post, :put, :patch]
   match '/issues/preview', :to => 'previews#issue', :as => 'preview_issue', :via => [:get, :post, :put, :patch]
@@ -60,6 +67,8 @@ Rails.application.routes.draw do
       get 'diff'
     end
   end
+
+  resources :reactions, only: [:create, :destroy]
 
   get '/projects/:project_id/issues/gantt', :to => 'gantts#show', :as => 'project_gantt'
   get '/issues/gantt', :to => 'gantts#show'
@@ -288,7 +297,7 @@ Rails.application.routes.draw do
         :controller => 'repositories',
         :action => action,
         :format => 'html',
-        :constraints => {:rev => /[a-z0-9\.\-_]+/, :path => /.*/}
+        :constraints => {:rev => /[a-z0-9.\-_]+/, :path => /.*/}
   end
 
   %w(browse entry raw changes annotate).each do |action|
@@ -302,7 +311,7 @@ Rails.application.routes.draw do
   get "projects/:id/repository/:repository_id/revisions/:rev/diff(/*path)",
       :to => 'repositories#diff',
       :format => 'html',
-      :constraints => {:rev => /[a-z0-9\.\-_]+/, :path => /.*/, :format => /(html|diff)/ }
+      :constraints => {:rev => /[a-z0-9.\-_]+/, :path => /.*/, :format => /(html|diff)/ }
 
   get "projects/:id/repository/:repository_id/diff(/*path)",
       :to => 'repositories#diff',
@@ -316,7 +325,7 @@ Rails.application.routes.draw do
 
   # additional routes for having the file name at the end of url
   get 'attachments/:id/:filename', :to => 'attachments#show', :id => /\d+/, :filename => /.*/, :as => 'named_attachment', :format => 'html'
-  get 'attachments/download/:id/:filename', :to => 'attachments#download', :id => /\d+/, :filename => /.*/, :as => 'download_named_attachment'
+  get 'attachments/download/:id/:filename', :to => 'attachments#download', :id => /\d+/, :filename => /.*/, :as => 'download_named_attachment', :format => 'html'
   get 'attachments/download/:id', :to => 'attachments#download', :id => /\d+/
   get 'attachments/thumbnail/:id(/:size)', :to => 'attachments#thumbnail', :id => /\d+/, :size => /\d+/, :as => 'thumbnail'
   resources :attachments, :only => [:show, :update, :destroy]
@@ -337,6 +346,7 @@ Rails.application.routes.draw do
 
   get 'groups/:id/users/new', :to => 'groups#new_users', :id => /\d+/, :as => 'new_group_users'
   post 'groups/:id/users', :to => 'groups#add_users', :id => /\d+/, :as => 'group_users'
+  delete 'groups/:id/users', :to => 'groups#remove_users', :id => /\d+/
   delete 'groups/:id/users/:user_id', :to => 'groups#remove_user', :id => /\d+/, :as => 'group_user'
 
   resources :trackers, :except => :show do
@@ -363,7 +373,6 @@ Rails.application.routes.draw do
   match 'enumerations/:type', :to => 'enumerations#index', :via => :get
 
   get '(projects/:id)/search', :controller => 'search', :action => 'index', :as => 'search'
-
 
   get  'mail_handler', :to => 'mail_handler#new'
   post 'mail_handler', :to => 'mail_handler#index'
@@ -409,8 +418,16 @@ Rails.application.routes.draw do
 
   get 'robots.:format', :to => 'welcome#robots', :constraints => {:format => 'txt'}
 
+  if Rails.env.development?
+    get 'rails/info/svg_icons', :to => 'svg_icons#index'
+  end
+
   get 'help/wiki_syntax/(:type)', :controller => 'help', :action => 'show_wiki_syntax', :constraints => { :type => /detailed/ }, :as => 'help_wiki_syntax'
   get 'help/code_highlighting', :controller => 'help', :action => 'show_code_highlighting',  :as => 'help_code_highlighting'
+
+  # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
+  # Can be used by load balancers and uptime monitors to verify that the app is live.
+  get "up" => "rails/health#show", :as => :rails_health_check
 
   Redmine::Plugin.directory.glob("*/config/routes.rb").sort.each do |plugin_routes_path|
     instance_eval(plugin_routes_path.read, plugin_routes_path.to_s)

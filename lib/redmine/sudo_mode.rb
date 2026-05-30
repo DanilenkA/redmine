@@ -124,6 +124,7 @@ module Redmine
         @sudo_form.original_fields = params.slice(*param_names)
         # a simple 'render "sudo_mode/new"' works when used directly inside an
         # action, but not when called from a before_action:
+        no_store
         respond_to do |format|
           format.html {render 'sudo_mode/new'}
           format.js   {render 'sudo_mode/new'}
@@ -153,7 +154,7 @@ module Redmine
       # Before Filter which is used by the require_sudo_mode class method.
       class SudoRequestFilter < Struct.new(:parameters, :request_methods)
         def before(controller)
-          method_matches = request_methods.blank? || request_methods.include?(controller.request.method_symbol)
+          method_matches = request_methods.blank? || request_methods.include?(controller.request.request_method_symbol)
           if controller.api_request?
             true
           elsif SudoMode.possible? && method_matches

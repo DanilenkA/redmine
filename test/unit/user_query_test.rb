@@ -19,6 +19,20 @@
 require_relative '../test_helper'
 
 class UserQueryTest < ActiveSupport::TestCase
+  def test_default_columns_names_should_show_lastname_before_firstname_when_user_format_requires_it
+    with_settings user_format: 'lastname_firstname' do
+      assert_equal [:login, :lastname, :firstname, :mail, :admin, :created_on, :last_login_on],
+                   UserQuery.new.default_columns_names
+    end
+  end
+
+  def test_default_columns_names_should_show_firstname_before_lastname_when_user_format_is_default
+    with_settings user_format: 'firstname_lastname' do
+      assert_equal [:login, :firstname, :lastname, :mail, :admin, :created_on, :last_login_on],
+                   UserQuery.new.default_columns_names
+    end
+  end
+
   def test_available_columns_should_include_user_custom_fields
     query = UserQuery.new
     assert_include :cf_4, query.available_columns.map(&:name)
@@ -207,6 +221,30 @@ class UserQueryTest < ActiveSupport::TestCase
 
     assert_equal 2, users.size
     assert_equal [2, 1], users.pluck(:id)
+  end
+
+  def test_user_query_is_only_visible_to_admins
+    q = UserQuery.new(name: '_')
+    assert q.save
+
+    admin = User.admin(true).first
+    user = User.admin(false).first
+
+    assert q.visible?(admin)
+    assert_include q, UserQuery.visible(admin).to_a
+
+    assert_not q.visible?(user)
+    assert_not_include q, UserQuery.visible(user)
+  end
+
+  def test_user_query_is_only_editable_by_admins
+    q = UserQuery.new(name: '_')
+
+    admin = User.admin(true).first
+    user = User.admin(false).first
+
+    assert q.editable_by?(admin)
+    assert_not q.editable_by?(user)
   end
 
   def find_users_with_query(query)

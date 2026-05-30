@@ -112,8 +112,13 @@ class IssuesController < ApplicationController
     respond_to do |format|
       format.html do
         @priorities = IssuePriority.active
-        @time_entry = TimeEntry.new(:issue => @issue, :project => @issue.project)
-        @time_entries = @issue.time_entries.visible.preload(:activity, :user)
+        if @project.module_enabled?(:time_tracking)
+          @time_entry = TimeEntry.new(:issue => @issue, :project => @issue.project)
+          @time_entries = @issue.time_entries.visible.preload(:activity, :user)
+        else
+          @time_entry = nil
+          @time_entries = []
+        end
         @relation = IssueRelation.new
         @has_changesets = @issue.changesets.visible.preload(:repository, :user).exists?
         retrieve_previous_and_next_issue_ids
@@ -613,6 +618,8 @@ class IssuesController < ApplicationController
     end
     @issue.author ||= User.current
     @issue.start_date ||= User.current.today if Setting.default_issue_start_date_to_creation_date?
+    offset = Setting.default_issue_due_date_offset_in_days
+    @issue.due_date ||= User.current.today + offset if offset
 
     attrs = (params[:issue] || {}).deep_dup
     if action_name == 'new' && params[:was_default_status] == attrs[:status_id]
@@ -622,6 +629,12 @@ class IssuesController < ApplicationController
       # Discard submitted version when changing the project on the issue form
       # so we can use the default version for the new project
       attrs.delete(:fixed_version_id)
+    end
+    if action_name == 'new' &&
+         %w[issue_project_id issue_tracker_id].include?(params[:form_update_triggered_by]) &&
+         attrs[:is_private] != '1'
+      # Drop the unchecked value so the selected tracker's private default can be applied.
+      attrs.delete(:is_private)
     end
     attrs[:assigned_to_id] = User.current.id if attrs[:assigned_to_id] == 'me'
     @issue.safe_attributes = attrs

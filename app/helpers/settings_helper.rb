@@ -25,7 +25,7 @@ module SettingsHelper
         {:name => 'display', :partial => 'settings/display', :label => :label_display},
         {:name => 'authentication', :partial => 'settings/authentication',
          :label => :label_authentication},
-        {:name => 'api', :partial => 'settings/api', :label => :label_api},
+        {:name => 'integrations', :partial => 'settings/api', :label => :label_integrations},
         {:name => 'projects', :partial => 'settings/projects', :label => :label_project_plural},
         {:name => 'users', :partial => 'settings/users', :label => :label_user_plural},
         {:name => 'issues', :partial => 'settings/issues', :label => :label_issue_tracking},
@@ -48,7 +48,11 @@ module SettingsHelper
     errors.each do |name, message|
       s << content_tag('li', content_tag('b', l("setting_#{name}")) + " " + message)
     end
-    content_tag('div', content_tag('ul', s), :id => 'errorExplanation')
+
+    h = ''.html_safe
+    h << notice_icon('error')
+    h << content_tag('ul', s)
+    content_tag('div', h, :id => 'errorExplanation')
   end
 
   def setting_value(setting)
@@ -95,9 +99,9 @@ module SettingsHelper
       text_field_tag("settings[#{setting}]", setting_value(setting), options).html_safe
   end
 
-  def setting_text_area(setting, options={})
+  def setting_textarea(setting, options={})
     setting_label(setting, options).html_safe +
-      text_area_tag("settings[#{setting}]", setting_value(setting), options).html_safe
+      textarea_tag("settings[#{setting}]", setting_value(setting), options).html_safe
   end
 
   def setting_check_box(setting, options={})
@@ -196,6 +200,16 @@ module SettingsHelper
     options.map {|label, value| [l(label), value.to_s]}
   end
 
+  def assignee_dropdown_display_format_options
+    options = [
+      [:label_assignee_dropdown_display_format_users_then_groups, 'users_then_groups'],
+      [:label_assignee_dropdown_display_format_groups_then_users, 'groups_then_users'],
+      [:label_assignee_dropdown_display_format_users_by_group, 'users_by_group']
+    ]
+
+    options.map {|label, value| [l(label), value.to_s]}
+  end
+
   def parent_issue_dates_options
     options = [
       [:label_parent_task_attributes_derived, 'derived'],
@@ -235,11 +249,13 @@ module SettingsHelper
   end
 
   def gravatar_default_setting_options
-    [['Identicons', 'identicon'],
-     ['Monster ids', 'monsterid'],
+    [['Initials', 'initials'],
+     ['Color', 'color'],
      ['Mystery man', 'mm'],
+     ['Identicons', 'identicon'],
+     ['Monster ids', 'monsterid'],
+     ['Wavatars', 'wavatar'],
      ['Retro', 'retro'],
-     ['Robohash', 'robohash'],
-     ['Wavatars', 'wavatar']]
+     ['Robohash', 'robohash']]
   end
 end

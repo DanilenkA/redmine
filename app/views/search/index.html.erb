@@ -3,10 +3,7 @@
 <%= form_tag({}, :method => :get, :id => 'search-form') do %>
 <div class="box">
 <%= label_tag "search-input", l(:description_search), :class => "hidden-for-sighted" %>
-<p><%= text_field_tag 'q', @question, :size => 60, :id => 'search-input',
-                      :data => {
-                          :auto_complete => true
-                      } %>
+<p><%= text_field_tag 'q', @question, :size => 60, :id => 'search-input', :data => { :auto_complete => true } %>
 <%= project_select_tag %>
 <%= hidden_field_tag 'all_words', '', :id => nil %>
 <label><%= check_box_tag 'all_words', 1, @all_words %> <%= l(:label_all_words) %></label>
@@ -25,7 +22,7 @@
 
 <fieldset class="collapsible collapsed">
   <legend onclick="toggleFieldset(this);" class="icon icon-collapsed">
-    <%= sprite_icon("angle-right") %>
+    <%= sprite_icon("angle-right", rtl: true) %>
     <%= l(:label_options) %>
   </legend>
   <div id="options-content" style="display:none;">

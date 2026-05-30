@@ -69,12 +69,12 @@ class Repository < ApplicationRecord
     end
   end
 
-  def self.human_attribute_name(attribute_key_name, *args)
+  def self.human_attribute_name(attribute_key_name, *)
     attr_name = attribute_key_name.to_s
     if attr_name == "log_encoding"
       attr_name = "commit_logs_encoding"
     end
-    super(attr_name, *args)
+    super(attr_name, *)
   end
 
   # Removes leading and trailing whitespace
@@ -133,11 +133,7 @@ class Repository < ApplicationRecord
   end
 
   def identifier_param
-    if identifier.present?
-      identifier
-    else
-      id.to_s
-    end
+    (identifier.presence || id.to_s)
   end
 
   def <=>(repository)
@@ -265,6 +261,34 @@ class Repository < ApplicationRecord
     @latest_changeset ||= changesets.first
   end
 
+  def previous_changeset(changeset)
+    changesets.
+      reorder(nil).
+      where(
+        [
+          "(#{Changeset.table_name}.committed_on < ? OR " \
+          "(#{Changeset.table_name}.committed_on = ? AND #{Changeset.table_name}.id < ?))",
+          changeset.committed_on, changeset.committed_on, changeset.id
+        ]
+      ).
+      order(committed_on: :desc, id: :desc).
+      first
+  end
+
+  def next_changeset(changeset)
+    changesets.
+      reorder(nil).
+      where(
+        [
+          "(#{Changeset.table_name}.committed_on > ? OR " \
+          "(#{Changeset.table_name}.committed_on = ? AND #{Changeset.table_name}.id > ?))",
+          changeset.committed_on, changeset.committed_on, changeset.id
+        ]
+      ).
+      order(committed_on: :asc, id: :asc).
+      first
+  end
+
   # Returns the latest changesets for +path+
   # Default behaviour is to search in cached changesets
   def latest_changesets(path, rev, limit=10)
@@ -338,7 +362,7 @@ class Repository < ApplicationRecord
 
   def repo_log_encoding
     encoding = log_encoding.to_s.strip
-    encoding.blank? ? 'UTF-8' : encoding
+    (encoding.presence || 'UTF-8')
   end
 
   # Fetches new changesets for all repositories of active projects
@@ -369,8 +393,8 @@ class Repository < ApplicationRecord
     subclasses.collect {|klass| [klass.scm_name, klass.name]}
   end
 
-  def self.factory(klass_name, *args)
-    repository_class(klass_name).new(*args) rescue nil
+  def self.factory(klass_name, *)
+    repository_class(klass_name).new(*) rescue nil
   end
 
   def self.repository_class(class_name)
@@ -434,9 +458,8 @@ class Repository < ApplicationRecord
     changes = Change.joins(:changeset).where("#{Changeset.table_name}.repository_id = ?", id).
                 select("committer, user_id, count(*) as count").group("committer, user_id")
     user_ids = changesets.filter_map(&:user_id).uniq
-    authors_names = User.where(:id => user_ids).inject({}) do |memo, user|
-      memo[user.id] = user.to_s
-      memo
+    authors_names = User.where(:id => user_ids).to_h do |user|
+      [user.id, user.to_s]
     end
     (commits + changes).inject({}) do |hash, element|
       mapped_name = element.committer

@@ -60,6 +60,8 @@ class Project < ApplicationRecord
                           :class_name => 'IssueCustomField',
                           :join_table => "#{table_name_prefix}custom_fields_projects#{table_name_suffix}",
                           :association_foreign_key => 'custom_field_id'
+  has_and_belongs_to_many :webhooks
+
   # Default Custom Query
   belongs_to :default_issue_query, :class_name => 'IssueQuery'
 
@@ -84,7 +86,9 @@ class Project < ApplicationRecord
   validates_format_of :identifier, :with => /\A(?!\d+$)[a-z0-9\-_]*\z/,
                       :if => proc {|p| p.identifier_changed?}
   # reserved words
-  validates_exclusion_of :identifier, :in => %w(new)
+  validates_exclusion_of :identifier,
+                         :in => %w(new autocomplete bulk_destroy),
+                         :if => -> { new_record? || will_save_change_to_identifier? }
   validate :validate_parent
 
   after_update :update_versions_from_hierarchy_change,
@@ -186,7 +190,7 @@ class Project < ApplicationRecord
     perm = Redmine::AccessControl.permission(permission)
     base_statement =
       if perm && perm.read?
-        "#{Project.table_name}.status <> #{Project::STATUS_ARCHIVED} AND #{Project.table_name}.status <> #{Project::STATUS_SCHEDULED_FOR_DELETION}"
+        "#{Project.table_name}.status IN (#{Project::STATUS_ACTIVE}, #{Project::STATUS_CLOSED})"
       else
         "#{Project.table_name}.status = #{Project::STATUS_ACTIVE}"
       end
@@ -358,12 +362,12 @@ class Project < ApplicationRecord
     end
   end
 
-  def self.find_by_param(*args)
-    self.find(*args)
+  def self.find_by_param(*)
+    self.find(*)
   end
 
   alias :base_reload :reload
-  def reload(*args)
+  def reload(*)
     @principals = nil
     @users = nil
     @shared_versions = nil
@@ -382,7 +386,7 @@ class Project < ApplicationRecord
     @override_members = nil
     @assignable_users = nil
     @last_activity_date = nil
-    base_reload(*args)
+    base_reload(*)
   end
 
   def to_param
@@ -819,7 +823,7 @@ class Project < ApplicationRecord
   #   project.disable_module!(project.enabled_modules.first)
   def disable_module!(target)
     target = enabled_modules.detect{|mod| target.to_s == mod.name} unless enabled_modules.include?(target)
-    target.destroy unless target.blank?
+    (target.presence&.destroy)
   end
 
   safe_attributes(
@@ -909,7 +913,7 @@ class Project < ApplicationRecord
 
   # Returns an auto-generated project identifier based on the last identifier used
   def self.next_identifier
-    p = Project.order('id DESC').first
+    p = Project.order(id: :desc).first
     p.nil? ? nil : p.identifier.to_s.succ
   end
 
@@ -1153,9 +1157,8 @@ class Project < ApplicationRecord
       new_issue.project = self
       # Changing project resets the custom field values
       # TODO: handle this in Issue#project=
-      new_issue.custom_field_values = issue.custom_field_values.inject({}) do |h, v|
-        h[v.custom_field_id] = v.value
-        h
+      new_issue.custom_field_values = issue.custom_field_values.to_h do |v|
+        [v.custom_field_id, v.value]
       end
       # Reassign fixed_versions by name, since names are unique per project
       if issue.fixed_version && issue.fixed_version.project == project
@@ -1242,9 +1245,9 @@ class Project < ApplicationRecord
   # Copies members from +project+
   def copy_members(project)
     # Copy users first, then groups to handle members with inherited and given roles
-    members_to_copy = []
-    members_to_copy += project.memberships.select {|m| m.principal.is_a?(User)}
-    members_to_copy += project.memberships.select {|m| !m.principal.is_a?(User)}
+    user_memberships, group_memberships =
+      project.memberships.partition {|m| m.principal.is_a?(User)}
+    members_to_copy = user_memberships + group_memberships
 
     members_to_copy.each do |member|
       new_member = Member.new

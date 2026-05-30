@@ -2,6 +2,7 @@
 
 <% if @saved_issues && @unsaved_issues.present? %>
 <div id="errorExplanation">
+  <%= notice_icon('error') %>
   <span>
     <%= l(:notice_failed_to_save_issues,
         :count => @unsaved_issues.size,
@@ -212,17 +213,17 @@
     <label><%= custom_field.name %></label>
     <%= custom_field_tag_for_bulk_edit('issue', custom_field, @issues, @issue_params[:custom_field_values][custom_field.id.to_s]) %>
   </p>
-  <%= wikitoolbar_for "issue_custom_field_values_#{custom_field.id}", preview_issue_path(:project_id => @project, :issue_id => nil) if custom_field.full_text_formatting? %>
+  <%= wikitoolbar_for "issue_custom_field_values_#{custom_field.id}", (@project ? preview_issue_path(:project_id => @project, :issue_id => nil) : preview_text_path) if custom_field.full_text_formatting? %>
 <% end %>
 
 </fieldset>
 
 <fieldset>
 <legend><%= l(:field_notes) %></legend>
-<%= text_area_tag 'notes', @notes, :cols => 60, :rows => 10, :class => 'wiki-edit',
+<%= textarea_tag 'notes', @notes, :cols => 60, :rows => 10, :class => 'wiki-edit',
                   :data => {
-                      :auto_complete => true
-                  }
+                    :auto_complete => true
+                  }.merge(wiki_textarea_stimulus_attributes)
 %>
 <%= wikitoolbar_for 'notes' %>
 
@@ -241,6 +242,7 @@
 
 <% if @values_by_custom_field.present? %>
 <div class="flash warning">
+  <%= notice_icon('warning') %>
   <%= l(:warning_fields_cleared_on_bulk_edit) %>:<br />
   <%= safe_join(@values_by_custom_field.map {|field, ids| content_tag "span", "#{field.name} (#{ids.size})"}, ', ') %>
 </div>
